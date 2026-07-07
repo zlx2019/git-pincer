@@ -1,0 +1,44 @@
+[package]
+name = "git-peace"
+version = "0.1.0"
+edition = "2024"
+rust-version = "1.96.0"
+authors = ["Zero <1143967454@qq.com>"]
+description = "A simple and compact Git CLI, mainly used for resolving conflicts."
+documentation = "https://docs.rs/git-peace"
+homepage = "https://github.com/zlx2019/git-peace"
+repository = "https://github.com/zlx2019/git-peace"
+readme = "README.md"
+license = "MIT"
+keywords = []
+
+[dependencies]
+clap = { version = "4", features = ["derive"] }
+anyhow = "1"
+thiserror = "2"
+similar = "3.1"
+ratatui = "0.30"
+
+[dev-dependencies]
+
+[build-dependencies]
+
+[features]
+
+
+[lints.rust]
+unsafe_code = "warn"      # 使用 unsafe 代码时告警（确需时可局部 #[allow]）
+missing_docs = "warn"     # 公共项缺少文档注释时告警
+
+[lints.clippy]
+unwrap_used = "warn"      # 使用 unwrap 时告警（测试/原型代码可局部 allow）
+
+### Working directory
+[workspace]
+members = []
+
+### Production packaging configuration
+[profile.release]
+
+### Debug packaging configuration
+[profile.dev]

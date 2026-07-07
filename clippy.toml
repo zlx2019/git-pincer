@@ -1,0 +1,4 @@
+# Clippy 配置
+# 允许在测试代码中使用 unwrap，与 Cargo.toml [lints.clippy] 的 unwrap_used 配套：
+# 业务代码禁用 unwrap，但单元测试 / 集成测试中可自由使用。
+allow-unwrap-in-tests = true
