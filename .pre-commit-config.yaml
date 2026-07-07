@@ -1,0 +1,68 @@
+# pre-commit 在 git commit 时, 会根据以下配置对代码进行预检查，只有所有检查都通过时才会成功提交。
+
+# pre-commit 检测配置
+# pre-commit 主要用于 git commit之前，对代码进行检查.
+
+fail_fast: false
+repos:
+  - repo: https://github.com/pre-commit/pre-commit-hooks
+    rev: v5.0.0
+    hooks:
+      - id: fix-byte-order-marker
+      - id: check-case-conflict
+      - id: check-merge-conflict
+      - id: check-symlinks
+      - id: check-yaml
+      - id: end-of-file-fixer
+      - id: mixed-line-ending
+      - id: trailing-whitespace
+  - repo: local
+    # 自定义hook检测
+    hooks:
+      # 对代码进行格式化.
+      - id: cargo-fmt
+        name: cargo fmt
+        description: Format files with rustfmt.
+        entry: bash -c 'cargo fmt -- --check'
+        language: system
+        files: \.rs$
+        args: []
+        # 对安装的依赖进行安全检测（依赖变更发生在 Cargo.toml/lock，而非 .rs 文件）
+      - id: cargo-deny
+        name: cargo deny check
+        description: Check cargo dependencies
+        entry: bash -c 'cargo deny check -d'
+        language: system
+        files: (Cargo\.(toml|lock)|deny\.toml)$
+        pass_filenames: false
+        # typos 检测.
+      - id: typos
+        name: typos
+        description: check typo
+        entry: bash -c 'typos'
+        language: system
+        pass_filenames: false
+        # Rust代码语法检测.
+      - id: cargo-check
+        name: cargo check
+        description: Check the package for errors.
+        entry: bash -c 'cargo check --all'
+        language: system
+        files: (\.rs|Cargo\.(toml|lock))$
+        pass_filenames: false
+        # lint 检测
+      - id: cargo-clippy
+        name: cargo clippy
+        description: Lint rust sources
+        entry: bash -c 'cargo clippy --all-targets --all-features --tests --benches -- -D warnings'
+        language: system
+        files: (\.rs|Cargo\.(toml|lock))$
+        pass_filenames: false
+        # 执行单元测试
+      - id: cargo-test
+        name: cargo test
+        description: unit test for the project
+        entry: bash -c 'cargo nextest run --all-features --no-tests pass'
+        language: system
+        files: (\.rs|Cargo\.(toml|lock))$
+        pass_filenames: false

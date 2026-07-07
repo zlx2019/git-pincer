@@ -1,0 +1,92 @@
+//! 用户服务配置模块(git-peace 练手示例)。
+//!
+//! 本文件包含 7 处典型冲突,直接体验:
+//!   cargo run -- file fixtures/conflict_rich.txt
+//! ① import 冲突  ② 单行值冲突  ③ 双方新增不同内容
+//! ④ diff3 风格(含 base 段)  ⑤ 删除 vs 修改  ⑥ 多行块重写  ⑦ 末尾冲突
+//! 中间穿插长稳定区,可用 z 体验折叠/展开,n/p 在冲突间跳转。
+
+use std::collections::HashMap;
+// ① 双方引入了不同的智能指针
+<<<<<<< HEAD
+use std::sync::Arc;
+=======
+use std::rc::Rc;
+>>>>>>> feature/cache
+use std::time::Duration;
+
+// ② 单行冲突:双方把超时改成了不同的值
+<<<<<<< HEAD
+const TIMEOUT_SECS: u64 = 60;
+=======
+const TIMEOUT_SECS: u64 = 30;
+>>>>>>> feature/cache
+
+// ③ 双方各自新增了不同的常量(base 里原本没有这一段)
+<<<<<<< HEAD
+const MAX_RETRIES: u32 = 3;
+const BACKOFF_MS: u64 = 200;
+=======
+const MAX_CONNECTIONS: usize = 128;
+>>>>>>> feature/cache
+
+// —— 以下是一段双方都没改动的稳定区(体验 z 折叠)——
+pub struct Config {
+    pub host: String,
+    pub port: u16,
+    pub timeout: Duration,
+    pub tags: HashMap<String, String>,
+}
+
+impl Config {
+    pub fn is_local(&self) -> bool {
+        self.host == "127.0.0.1" || self.host == "localhost"
+    }
+}
+
+// ④ diff3 风格冲突(带 ||||||| base 段,「忽略」可回退到原始版本)
+<<<<<<< HEAD
+pub fn load_config(path: &str, strict: bool) -> Config {
+||||||| merged common ancestors
+pub fn load_config(path: &str) -> Config {
+=======
+pub fn load_config(path: impl AsRef<Path>) -> anyhow::Result<Config> {
+>>>>>>> feature/cache
+    todo!("读取并解析配置文件")
+}
+
+// ⑤ 删除 vs 修改:HEAD 删掉了这个函数,feature 却改了它的实现
+//    (左栏为空,取本地 = 保持删除;取远端 = 保留新实现)
+<<<<<<< HEAD
+=======
+fn legacy_migrate(cfg: &mut Config) {
+    cfg.tags.insert("schema".into(), "v2".into());
+    cfg.timeout = Duration::from_secs(TIMEOUT_SECS);
+}
+>>>>>>> feature/cache
+
+// ⑥ 多行块重写:双方用完全不同的写法重写了同一段逻辑
+//    (适合按 e 进编辑器手工缝合)
+<<<<<<< HEAD
+fn group_items(items: Vec<Item>) -> HashMap<String, Vec<Item>> {
+    let mut cache = HashMap::new();
+    for item in items {
+        cache.entry(item.key.clone()).or_insert_with(Vec::new).push(item);
+    }
+    cache
+}
+=======
+fn group_items(items: Vec<Item>) -> HashMap<String, Vec<Item>> {
+    items.into_iter().fold(HashMap::new(), |mut acc, item| {
+        acc.entry(item.key.clone()).or_default().push(item);
+        acc
+    })
+}
+>>>>>>> feature/cache
+
+// ⑦ 文件末尾的冲突
+<<<<<<< HEAD
+// TODO: 补充连接池的监控埋点
+=======
+// FIXME: 连接池逻辑计划在 v2 整体重构
+>>>>>>> feature/cache
