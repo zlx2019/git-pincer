@@ -8,7 +8,7 @@ use crate::app::{FileEntry, FileMerge, Session};
 use crate::git::{ConflictedFile, Git, RepoState};
 use crate::ui::{self, Outcome};
 
-/// `git-peace`(无子命令):接管指定仓库已有的冲突现场。
+/// 处理仓库中产生冲突的文件
 pub fn run(verbose: bool, dir: &Path, light: bool) -> Result<()> {
     let git = Git::discover(dir, verbose)?;
     if git.conflicted_files()?.is_empty() && git.state()? == RepoState::Clean {
@@ -29,25 +29,19 @@ pub fn resolve_loop(git: &Git, light: bool) -> Result<()> {
                 println!("[git-peace] ✔ 全部完成,仓库已回到干净状态");
                 return Ok(());
             }
-            println!(
-                "[git-peace] 冲突已全部解决,执行 git {} --continue …",
-                state.op_name()
-            );
-            let out = git.continue_op(state)?;
-            if out.status.success() {
+            // 透传执行,git 与钩子的输出实时流向终端
+            println!("[git-peace] $ git {} --continue", state.op_name());
+            let status = git.continue_op(state)?;
+            if status.success() {
                 continue;
             }
-            // 非零退出:rebase 的下一个 commit 又冲突了则继续循环,否则如实报错。
-            // 钩子输出多在 stdout(如 pre-commit 的 fmt/clippy),需要一并展示
+            // 非零退出:rebase 的下一个 commit 又冲突了则继续循环,否则如实报错
             if git.conflicted_files()?.is_empty() {
-                let stdout = String::from_utf8_lossy(&out.stdout);
-                let stderr = String::from_utf8_lossy(&out.stderr);
                 bail!(
-                    "git {} --continue 失败:\n{}\n{}\n\n提示:若是 pre-commit 钩子拒绝提交(fmt / clippy 等),\
+                    "git {} --continue 失败(git 输出见上方)。\n\
+                     提示:若是 pre-commit 钩子拒绝提交(fmt / clippy 等),\
                      修复问题并 git add 后重新运行 git-peace 即可继续,已解决的冲突不会丢失",
-                    state.op_name(),
-                    stdout.trim(),
-                    stderr.trim()
+                    state.op_name()
                 );
             }
             println!("[git-peace] 进入下一轮,仍有冲突待解决");

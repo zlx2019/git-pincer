@@ -39,8 +39,14 @@ pub enum RepoState {
     Clean,
     /// merge 进行中(存在 MERGE_HEAD)
     Merging,
-    /// rebase 进行中(存在 rebase-merge / rebase-apply)
+    /// rebase 进行中(存在 rebase-merge,或不带 applying 标记的 rebase-apply)
     Rebasing,
+    /// cherry-pick 进行中(存在 CHERRY_PICK_HEAD)
+    CherryPicking,
+    /// revert 进行中(存在 REVERT_HEAD)
+    Reverting,
+    /// git am 打补丁进行中(存在 rebase-apply/applying)
+    Am,
 }
 
 impl RepoState {
@@ -50,6 +56,9 @@ impl RepoState {
             RepoState::Clean => "clean",
             RepoState::Merging => "merge",
             RepoState::Rebasing => "rebase",
+            RepoState::CherryPicking => "cherry-pick",
+            RepoState::Reverting => "revert",
+            RepoState::Am => "am",
         }
     }
 }
@@ -166,8 +175,21 @@ impl Git {
             let p = PathBuf::from(&raw);
             if p.is_absolute() { p } else { self.top.join(p) }
         };
-        if git_dir.join("rebase-merge").exists() || git_dir.join("rebase-apply").exists() {
+        // rebase 必须先于 cherry-pick 判定:交互式 rebase 内部逐个重放提交,
+        // 冲突时也会留下 CHERRY_PICK_HEAD,但收尾命令是 rebase --continue
+        if git_dir.join("rebase-apply").exists() {
+            // rebase-apply/applying 是 git am 的标记(git 自身也以此区分两者)
+            if git_dir.join("rebase-apply/applying").exists() {
+                Ok(RepoState::Am)
+            } else {
+                Ok(RepoState::Rebasing)
+            }
+        } else if git_dir.join("rebase-merge").exists() {
             Ok(RepoState::Rebasing)
+        } else if git_dir.join("CHERRY_PICK_HEAD").exists() {
+            Ok(RepoState::CherryPicking)
+        } else if git_dir.join("REVERT_HEAD").exists() {
+            Ok(RepoState::Reverting)
         } else if git_dir.join("MERGE_HEAD").exists() {
             Ok(RepoState::Merging)
         } else {
@@ -198,29 +220,34 @@ impl Git {
 
     /// 继续当前 merge / rebase(冲突全部解决后调用)。
     ///
-    /// 返回原始输出而非直接判错:rebase --continue 在下一个 commit
+    /// 以透传模式执行:git 与钩子的输出(含颜色)实时流向用户终端。
+    /// 返回退出码而非直接判错:rebase --continue 在下一个 commit
     /// 冲突时也会非零退出,是否算失败由调用方结合冲突探测决定。
-    pub fn continue_op(&self, state: RepoState) -> Result<Output, GitError> {
-        match state {
-            RepoState::Merging => self.run(&["-c", "core.editor=true", "merge", "--continue"]),
-            RepoState::Rebasing => self.run(&["-c", "core.editor=true", "rebase", "--continue"]),
-            RepoState::Clean => Err(GitError::Failed {
-                cmd: "--continue".to_owned(),
-                stderr: "仓库当前没有进行中的合并操作".to_owned(),
-            }),
-        }
+    pub fn continue_op(&self, state: RepoState) -> Result<ExitStatus, GitError> {
+        let op = match state {
+            RepoState::Clean => {
+                return Err(GitError::Failed {
+                    cmd: "--continue".to_owned(),
+                    stderr: "仓库当前没有进行中的合并操作".to_owned(),
+                });
+            }
+            other => other.op_name(),
+        };
+        self.run_inherit(&["-c", "core.editor=true", op, "--continue"])
     }
 
     /// 中止当前 merge / rebase。
     pub fn abort_op(&self, state: RepoState) -> Result<(), GitError> {
-        match state {
-            RepoState::Merging => self.run_ok(&["merge", "--abort"]).map(|_| ()),
-            RepoState::Rebasing => self.run_ok(&["rebase", "--abort"]).map(|_| ()),
-            RepoState::Clean => Err(GitError::Failed {
-                cmd: "--abort".to_owned(),
-                stderr: "仓库当前没有进行中的合并操作".to_owned(),
-            }),
-        }
+        let op = match state {
+            RepoState::Clean => {
+                return Err(GitError::Failed {
+                    cmd: "--abort".to_owned(),
+                    stderr: "仓库当前没有进行中的合并操作".to_owned(),
+                });
+            }
+            other => other.op_name(),
+        };
+        self.run_ok(&[op, "--abort"]).map(|_| ())
     }
 }
 

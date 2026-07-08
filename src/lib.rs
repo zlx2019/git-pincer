@@ -1,8 +1,8 @@
 //! git-peace: a Git conflict-resolution tool that lives in your terminal.
 //!
 //! Provides an IDEA-style three-pane conflict resolution TUI (local | result | remote),
-//! and can also launch `merge / rebase / pull` directly, taking over the whole
-//! conflict-resolution flow that follows.
+//! and can also launch `merge / rebase / pull / cherry-pick / revert` directly,
+//! taking over the whole conflict-resolution flow that follows.
 //!
 //! Module overview:
 //! - [`merge`][] — diff3 three-way merge core and conflict-marker parsing (pure logic, ported from toolkit-rs)

@@ -21,15 +21,23 @@ pub struct Cli {
     /// 要处理的 Git 仓库路径(默认为当前工作目录)
     #[arg(short = 'C', long = "repo", global = true, value_name = "PATH")]
     pub repo: Option<PathBuf>,
-    /// 回显执行的 git 命令(可重复以提高级别,如 `-vv`)
-    #[arg(short, long, global = true, action = clap::ArgAction::Count)]
-    pub verbose: u8,
-    /// 使用浅色主题(适配浅色终端背景)
-    #[arg(long, global = true, conflicts_with = "dark")]
-    pub light: bool,
-    /// 使用深色主题(覆盖 COLORFGBG 自动检测;默认即深色)
-    #[arg(long, global = true)]
-    pub dark: bool,
+    /// Echo executed git command
+    #[arg(short, long, global = true)]
+    pub verbose: bool,
+    /// theme
+    #[arg(long, global = true, value_enum, default_value = "auto")]
+    pub theme: ThemeArg,
+}
+
+/// 界面主题选择。
+#[derive(Debug, Clone, Copy, PartialEq, Eq, clap::ValueEnum)]
+pub enum ThemeArg {
+    /// 按终端环境自动选择(读 COLORFGBG,检测不到用深色)
+    Auto,
+    /// 深色(Tokyo Night)
+    Dark,
+    /// 浅色(Maple Light,适配浅色终端背景)
+    Light,
 }
 
 /// 支持的子命令。
@@ -41,30 +49,35 @@ pub enum Commands {
     Rebase(commands::run::RebaseArgs),
     /// 执行 git pull
     Pull(commands::run::PullArgs),
+    /// 执行 git cherry-pick
+    CherryPick(commands::run::CherryPickArgs),
+    /// 执行 git revert
+    Revert(commands::run::RevertArgs),
     /// 处理单个带有冲突标记的文件
     File(commands::file::FileArgs),
-    /// 中止进行中的 merge / rebase
+    /// 中止进行中的合并操作(merge / rebase / cherry-pick / revert / am)
     Abort,
 }
 
 impl Cli {
     /// Distribute and execute the selected subcommands.
     pub fn run(self) -> Result<()> {
-        let verbose = self.verbose > 0;
+        let verbose = self.verbose;
         let dir = self.repo.unwrap_or_else(|| PathBuf::from("."));
-        // 主题变体:显式参数优先,否则按 COLORFGBG 推断(缺省深色)
-        let light = if self.light {
-            true
-        } else if self.dark {
-            false
-        } else {
-            crate::ui::detect_light()
+        let light = match self.theme {
+            ThemeArg::Light => true,
+            ThemeArg::Dark => false,
+            ThemeArg::Auto => crate::ui::detect_light(),
         };
         match self.command {
             None => commands::resolve::run(verbose, &dir, light),
             Some(Commands::Merge(args)) => commands::run::merge(args, verbose, &dir, light),
             Some(Commands::Rebase(args)) => commands::run::rebase(args, verbose, &dir, light),
             Some(Commands::Pull(args)) => commands::run::pull(args, verbose, &dir, light),
+            Some(Commands::CherryPick(args)) => {
+                commands::run::cherry_pick(args, verbose, &dir, light)
+            }
+            Some(Commands::Revert(args)) => commands::run::revert(args, verbose, &dir, light),
             Some(Commands::File(args)) => commands::file::run(args, light),
             Some(Commands::Abort) => commands::abort::run(verbose, &dir),
         }

@@ -142,12 +142,8 @@ fn resolve_and_continue_completes_merge() {
         .unwrap();
     assert!(git.conflicted_files().unwrap().is_empty());
 
-    let out = git.continue_op(RepoState::Merging).unwrap();
-    assert!(
-        out.status.success(),
-        "merge --continue 失败: {}",
-        String::from_utf8_lossy(&out.stderr)
-    );
+    let status = git.continue_op(RepoState::Merging).unwrap();
+    assert!(status.success(), "merge --continue 失败(输出见测试日志)");
     assert_eq!(git.state().unwrap(), RepoState::Clean);
 
     // 合并提交已生成,工作区内容为解决后的版本
@@ -191,12 +187,11 @@ fn rebase_conflict_is_detected_and_abortable() {
     assert_eq!(git.state().unwrap(), RepoState::Clean);
 }
 
-/// pre-commit 钩子拒绝提交时,--continue 非零退出、钩子输出可被捕获
-/// (git 会把钩子输出转到 stderr),仓库保持 merging 状态,
-/// 修复后可重试且已解决的冲突不丢。
+/// pre-commit 钩子拒绝提交时,--continue 非零退出(钩子输出经透传模式
+/// 直接流向终端),仓库保持 merging 状态,修复后可重试且已解决的冲突不丢。
 #[test]
 #[cfg(unix)]
-fn continue_failure_keeps_merging_state_and_surfaces_hook_output() {
+fn continue_failure_keeps_merging_state() {
     use std::os::unix::fs::PermissionsExt;
 
     let repo = conflicted_repo("hookfail");
@@ -208,14 +203,8 @@ fn continue_failure_keeps_merging_state_and_surfaces_hook_output() {
     git.stage_resolved("config.toml", b"host = \"merged\"\n")
         .unwrap();
 
-    let out = git.continue_op(RepoState::Merging).unwrap();
-    assert!(!out.status.success());
-    let combined = format!(
-        "{}{}",
-        String::from_utf8_lossy(&out.stdout),
-        String::from_utf8_lossy(&out.stderr)
-    );
-    assert!(combined.contains("hook-rejected"));
+    let status = git.continue_op(RepoState::Merging).unwrap();
+    assert!(!status.success());
     assert_eq!(git.state().unwrap(), RepoState::Merging);
     assert!(git.conflicted_files().unwrap().is_empty());
 }
@@ -228,4 +217,85 @@ fn discover_fails_outside_repo() {
     let result = Git::discover(&dir, false);
     assert!(matches!(result, Err(GitError::NotARepo)));
     let _ = std::fs::remove_dir_all(&dir);
+}
+
+#[test]
+fn cherry_pick_conflict_detected_and_continues() {
+    let repo = TempRepo::new("cherrypick");
+    repo.write("a.txt", "base\n");
+    repo.commit_all("init");
+    repo.git(&["checkout", "-b", "feature"]);
+    repo.write("a.txt", "feature\n");
+    repo.commit_all("feature change");
+    let commit = repo.git(&["rev-parse", "HEAD"]).trim().to_owned();
+    repo.git(&["checkout", "main"]);
+    repo.write("a.txt", "main\n");
+    repo.commit_all("main change");
+    assert!(
+        !repo.git_allow_fail(&["cherry-pick", &commit]),
+        "cherry-pick 应产生冲突"
+    );
+
+    let git = Git::discover(&repo.dir, false).unwrap();
+    assert_eq!(git.state().unwrap(), RepoState::CherryPicking);
+    assert_eq!(git.conflicted_files().unwrap().len(), 1);
+
+    // 解决后 --continue 完成摘取,生成新提交
+    git.stage_resolved("a.txt", b"resolved\n").unwrap();
+    let status = git.continue_op(RepoState::CherryPicking).unwrap();
+    assert!(status.success(), "cherry-pick --continue 失败");
+    assert_eq!(git.state().unwrap(), RepoState::Clean);
+    assert!(repo.git(&["log", "--oneline"]).contains("feature change"));
+}
+
+#[test]
+fn revert_conflict_detected_and_abortable() {
+    let repo = TempRepo::new("revert");
+    repo.write("a.txt", "v1\n");
+    repo.commit_all("c1");
+    repo.write("a.txt", "v2\n");
+    repo.commit_all("c2");
+    let target = repo.git(&["rev-parse", "HEAD"]).trim().to_owned();
+    repo.write("a.txt", "v3\n");
+    repo.commit_all("c3");
+    // 撤销 c2(v1→v2)需套用反向 diff,但内容已是 v3 → 冲突
+    assert!(
+        !repo.git_allow_fail(&["revert", "--no-edit", &target]),
+        "revert 应产生冲突"
+    );
+
+    let git = Git::discover(&repo.dir, false).unwrap();
+    assert_eq!(git.state().unwrap(), RepoState::Reverting);
+    assert_eq!(git.conflicted_files().unwrap().len(), 1);
+
+    git.abort_op(RepoState::Reverting).unwrap();
+    assert_eq!(git.state().unwrap(), RepoState::Clean);
+    let content = std::fs::read_to_string(repo.dir.join("a.txt")).unwrap();
+    assert_eq!(content, "v3\n");
+}
+
+/// git am 与 rebase 共用 rebase-apply 目录,必须按 applying 标记区分,
+/// 否则会错误地用 rebase --continue 收尾。
+#[test]
+fn am_state_detected_distinct_from_rebase() {
+    let repo = TempRepo::new("am");
+    repo.write("a.txt", "one\n");
+    repo.commit_all("c1");
+    repo.write("a.txt", "two\n");
+    repo.commit_all("c2");
+    let patch = repo.git(&["format-patch", "-1", "HEAD", "--stdout"]);
+    repo.git(&["reset", "--hard", "HEAD~1"]);
+    repo.write("a.txt", "three\n");
+    repo.commit_all("divergent");
+    // 补丁写在 divergent 提交之后,保持未跟踪状态
+    repo.write("fix.patch", &patch);
+    assert!(
+        !repo.git_allow_fail(&["am", "-3", "fix.patch"]),
+        "am 应产生冲突"
+    );
+
+    let git = Git::discover(&repo.dir, false).unwrap();
+    assert_eq!(git.state().unwrap(), RepoState::Am);
+    git.abort_op(RepoState::Am).unwrap();
+    assert_eq!(git.state().unwrap(), RepoState::Clean);
 }
