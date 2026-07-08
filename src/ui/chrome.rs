@@ -218,10 +218,10 @@ fn keycap(key: &str, theme: &Theme) -> Span<'static> {
 /// 底部按键提示条(键帽 + 描述)。
 fn draw_hints(frame: &mut Frame, area: Rect, theme: &Theme) {
     const ITEMS: [(&str, &str); 11] = [
-        ("h", "取本地"),
-        ("l", "取远端"),
+        ("h", "取左"),
+        ("l", "取右"),
         ("x", "忽略"),
-        ("u", "撤销"),
+        ("u/U", "撤销"),
         ("e", "编辑"),
         ("n/p", "冲突"),
         ("w", "写盘"),
@@ -247,7 +247,7 @@ fn draw_help(frame: &mut Frame, theme: &Theme) {
         ("h / ←", "取用本地(两侧先后取用=都要)"),
         ("l / →", "取用远端改动"),
         ("x", "忽略未处理的侧(保留 base)"),
-        ("u", "撤销当前块的决定"),
+        ("u / U", "撤销当前块 / 全部块"),
         ("e", "$EDITOR 编辑当前块"),
         ("a", "应用全部非冲突改动"),
         ("w", "写盘(自动应用非冲突)"),

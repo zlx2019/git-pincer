@@ -29,6 +29,8 @@ use crate::merge::{ChunkKind, MergeChunk};
 const EMPH_MAX_LINES: usize = 400;
 /// 单行字节数超限时跳过该行的词级 diff
 const EMPH_MAX_LINE_BYTES: usize = 2000;
+/// 词级强调的占比上限(%):强调字节超过行长的该比例时退化为整行色带
+const EMPH_MAX_RATIO: usize = 70;
 /// 语法高亮的降级阈值:三栏总行数超限的文件禁用 syntect(fancy-regex 较慢)
 const SYNTAX_MAX_LINES: usize = 10_000;
 
@@ -390,6 +392,11 @@ fn cross_emphasis(chunk: &MergeChunk, out: &mut ChunkEmphasis) {
 
 /// 行内词级 diff:返回 new 侧中与 old 不同的字节区间(相邻区间合并)。
 ///
+/// 两个视觉优化(与 delta 语义一致):
+/// - 强调段之间仅隔纯空白时并入同一段,避免断裂的碎片感;
+/// - 强调覆盖占比超过 [`EMPH_MAX_RATIO`] 时整行退化为纯色带,
+///   几乎整行都变了时词级强调只剩噪点。
+///
 /// 游标只在 Equal 与 Insert 时前进(两者都是 new 侧的内容),
 /// 因此区间必然落在 char 边界上,渲染层切片安全。
 fn line_emphasis(old: &str, new: &str) -> Emphasis {
@@ -404,14 +411,20 @@ fn line_emphasis(old: &str, new: &str) -> Emphasis {
             ChangeTag::Equal => pos += token.len(),
             ChangeTag::Insert => {
                 let next = pos + token.len();
-                // 相邻区间合并,减少渲染 Span 数量
+                // 相邻(间隙为空)或仅隔纯空白的区间并入同一段
                 match ranges.last_mut() {
-                    Some(last) if last.end == pos => last.end = next,
+                    Some(last) if new[last.end..pos].chars().all(char::is_whitespace) => {
+                        last.end = next;
+                    }
                     _ => ranges.push(pos..next),
                 }
                 pos = next;
             }
         }
+    }
+    let covered: usize = ranges.iter().map(ExactSizeIterator::len).sum();
+    if covered * 100 > new.len() * EMPH_MAX_RATIO {
+        return Emphasis::new();
     }
     ranges
 }
@@ -457,6 +470,20 @@ mod tests {
         let e = chunk_emphasis(&c);
         assert_eq!(e.ours[0], vec![6..11]); // "world"
         assert_eq!(e.theirs[0], vec![6..10]); // "rust"
+    }
+
+    /// 空白间隙桥接:相邻强调段之间只隔空格时并成一段连续强调
+    #[test]
+    fn whitespace_gaps_are_bridged() {
+        let e = line_emphasis("prefix stays aa bb", "prefix stays xx yy");
+        assert_eq!(e, vec![13..18]);
+    }
+
+    /// 强调覆盖占比超阈值的行退化为纯色带(无词级强调)
+    #[test]
+    fn mostly_changed_line_degrades_to_band() {
+        let e = line_emphasis("old", "an entirely different line");
+        assert!(e.is_empty());
     }
 
     /// 超大块直接降级为全空强调

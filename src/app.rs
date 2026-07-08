@@ -243,6 +243,13 @@ impl FileMerge {
         self.states[self.cursor] = ChunkState::new();
     }
 
+    /// 撤销本文件所有块的决定(含 $EDITOR 覆写),全部回到待处理。
+    pub fn undo_all(&mut self) {
+        for state in &mut self.states {
+            *state = ChunkState::new();
+        }
+    }
+
     /// 用 $EDITOR 编辑后的内容覆写当前块(视为已解决)。
     pub fn set_override(&mut self, lines: Vec<String>) {
         self.states[self.cursor].override_lines = Some(lines);
@@ -486,6 +493,22 @@ mod tests {
         merge.undo();
         assert!(!merge.chunk_resolved(1));
         assert_eq!(merge.current_content(1), vec!["b"]);
+    }
+
+    #[test]
+    fn undo_all_resets_every_chunk() {
+        let mut merge = sample();
+        merge.apply(Side::Ours);
+        merge.ignore(Side::Theirs);
+        merge.cursor = 3;
+        merge.apply(Side::Ours);
+        merge.set_override(vec!["edited".to_owned()]);
+        assert_eq!(merge.pending_changes(), 0);
+        merge.undo_all();
+        assert_eq!(merge.pending_changes(), 2);
+        assert!(!merge.chunk_resolved(1));
+        assert!(!merge.chunk_resolved(3));
+        assert_eq!(merge.current_content(3), vec!["d"]);
     }
 
     #[test]

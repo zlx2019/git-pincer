@@ -31,7 +31,7 @@ use ratatui::crossterm::event::{self, Event, KeyCode, KeyEventKind};
 use crate::app::{FileEntry, Session, Side};
 
 pub use chrome::draw;
-pub(crate) use menu::{MenuItem, notice, pick};
+pub(crate) use menu::{MenuItem, MenuSession};
 pub(crate) use theme::detect_light;
 
 /// 会话结束方式。
@@ -174,6 +174,11 @@ fn handle_file_key(session: &mut Session, code: KeyCode, ui: &mut UiState) -> bo
                 merge.undo();
                 true
             }
+            KeyCode::Char('U') => {
+                merge.undo_all();
+                ui.message = "已撤销本文件全部块的决定".to_owned();
+                true
+            }
             KeyCode::Char('a') => {
                 merge.apply_all_nonconflict();
                 ui.message = "已应用全部非冲突改动".to_owned();
@@ -225,7 +230,7 @@ fn handle_file_key(session: &mut Session, code: KeyCode, ui: &mut UiState) -> bo
             match code {
                 KeyCode::Char('h') | KeyCode::Left => *choice = Some(Side::Ours),
                 KeyCode::Char('l') | KeyCode::Right => *choice = Some(Side::Theirs),
-                KeyCode::Char('u') => *choice = None,
+                KeyCode::Char('u') | KeyCode::Char('U') => *choice = None,
                 _ => {}
             }
             false
