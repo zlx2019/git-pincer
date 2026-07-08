@@ -2,7 +2,6 @@
 # typos 主要用于检测一些单词的拼写是否正确.
 
 [default.extend-words]
-# TUI 库名,不是 ratatouille 的拼写错误
 ratatui = "ratatui"
 
 [files]
