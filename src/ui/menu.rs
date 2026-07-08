@@ -1,7 +1,8 @@
 //! 通用单选列表浮层:主操作菜单与分支 / 提交选择器共用。
 //!
-//! 独立的小型 ratatui 会话:选定或取消后立即退出并恢复终端,
-//! 与随后的 git 透传输出、冲突解决界面顺序衔接。
+//! [`MenuSession`] 把多级菜单与弹框收进同一次 ratatui 会话:
+//! 页面切换只清屏重绘,不退出 alternate screen,避免闪屏;
+//! 会话 Drop 时恢复终端,与随后的 git 透传输出、冲突解决界面顺序衔接。
 
 use std::io::IsTerminal;
 
@@ -139,25 +140,58 @@ fn wrap_move(cursor: usize, len: usize, delta: isize) -> usize {
     (cursor as isize + delta).rem_euclid(len as isize) as usize
 }
 
-/// 运行单选列表浮层;返回选中项下标,None 表示取消(q / Esc)或列表为空。
-/// `logo` 为 true 时在列表上方绘制 Ferris(主菜单用)。
-pub(crate) fn pick(
-    title: &str,
-    items: &[MenuItem],
-    light: bool,
-    logo: bool,
-) -> Result<Option<usize>> {
-    if items.is_empty() {
-        return Ok(None);
+/// 一次连续的菜单 TUI 会话:多级选择页与弹框共享同一终端现场。
+///
+/// 页面切换只清屏重绘,不反复进出 alternate screen,避免闪屏;
+/// Drop 时恢复终端,因此执行需要透传输出的 git 命令前应先结束会话。
+pub(crate) struct MenuSession {
+    /// 会话持有的终端(Drop 时统一恢复)
+    terminal: ratatui::DefaultTerminal,
+    /// 界面主题
+    theme: Theme,
+}
+
+impl MenuSession {
+    /// 打开菜单会话(进入 TUI);非交互终端直接报错。
+    pub(crate) fn open(light: bool) -> Result<Self> {
+        if !std::io::stdout().is_terminal() {
+            anyhow::bail!("打开选择菜单需要交互式终端(当前 stdout 不是 TTY)");
+        }
+        Ok(Self {
+            terminal: ratatui::init(),
+            theme: Theme::select(light),
+        })
     }
-    if !std::io::stdout().is_terminal() {
-        anyhow::bail!("打开选择菜单需要交互式终端(当前 stdout 不是 TTY)");
+
+    /// 运行单选列表页;返回选中项下标,None 表示取消(q / Esc)或列表为空。
+    /// `logo` 为 true 时在列表上方绘制 Ferris(主菜单用);
+    /// `initial` 为光标初始位置(从下级页面返回时停在上次的选项上)。
+    pub(crate) fn pick(
+        &mut self,
+        title: &str,
+        items: &[MenuItem],
+        logo: bool,
+        initial: usize,
+    ) -> Result<Option<usize>> {
+        if items.is_empty() {
+            return Ok(None);
+        }
+        // 清屏强制全量重绘,抹掉上一页的残留(各页面板尺寸不同)
+        self.terminal.clear()?;
+        pick_loop(&mut self.terminal, title, items, logo, initial, &self.theme)
     }
-    let theme = Theme::select(light);
-    let mut terminal = ratatui::init();
-    let result = pick_loop(&mut terminal, title, items, logo, &theme);
-    ratatui::restore();
-    result
+
+    /// 展示消息弹框(如失败原因),任意键关闭。
+    pub(crate) fn notice(&mut self, title: &str, body: &str) -> Result<()> {
+        self.terminal.clear()?;
+        notice_loop(&mut self.terminal, title, body, &self.theme)
+    }
+}
+
+impl Drop for MenuSession {
+    fn drop(&mut self) {
+        ratatui::restore();
+    }
 }
 
 /// 选择器事件循环:绘制 → 读键 → 移动 / 确认 / 取消。
@@ -166,9 +200,10 @@ fn pick_loop(
     title: &str,
     items: &[MenuItem],
     logo: bool,
+    initial: usize,
     theme: &Theme,
 ) -> Result<Option<usize>> {
-    let mut cursor = 0usize;
+    let mut cursor = initial.min(items.len() - 1);
     // ListState 跨帧保留滚动偏移,选中项始终保持在视口内
     let mut list = ListState::default();
     loop {
@@ -316,20 +351,6 @@ fn draw_pick(
 
     frame.render_widget(Clear, panel);
     frame.render_stateful_widget(list, panel, list_state);
-}
-
-/// 消息弹框:展示一段文本(如失败原因),任意键关闭。
-pub(crate) fn notice(title: &str, body: &str, light: bool) -> Result<()> {
-    if !std::io::stdout().is_terminal() {
-        // 非 TTY 场景直接打印,不进入弹框
-        eprintln!("[git-pincer] {title}: {body}");
-        return Ok(());
-    }
-    let theme = Theme::select(light);
-    let mut terminal = ratatui::init();
-    let result = notice_loop(&mut terminal, title, body, &theme);
-    ratatui::restore();
-    result
 }
 
 /// 弹框事件循环:绘制一次,等待任意按键关闭。
