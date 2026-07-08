@@ -17,7 +17,7 @@ pub struct FileArgs {
 }
 
 /// 运行单文件冲突解决。
-pub fn run(args: FileArgs) -> Result<()> {
+pub fn run(args: FileArgs, light: bool) -> Result<()> {
     let text = std::fs::read_to_string(&args.path)
         .with_context(|| format!("读取 {} 失败", args.path.display()))?;
     let result = parse_conflict_file(&text)?;
@@ -30,10 +30,14 @@ pub fn run(args: FileArgs) -> Result<()> {
     let merge = FileMerge::from_result(display.clone(), result, text.ends_with('\n'));
     let mut session = Session::new(vec![FileEntry::Text(merge)], "file".to_owned());
 
-    let outcome = ui::run_session(&mut session, &mut |_path: &str, bytes: &[u8]| {
-        std::fs::write(&args.path, bytes)?;
-        Ok(())
-    })?;
+    let outcome = ui::run_session(
+        &mut session,
+        &mut |_path: &str, bytes: &[u8]| {
+            std::fs::write(&args.path, bytes)?;
+            Ok(())
+        },
+        light,
+    )?;
     match outcome {
         Outcome::Completed => println!("[git-peace] ✔ 已写回 {display}"),
         Outcome::Quit => println!("[git-peace] 已退出,文件未修改"),

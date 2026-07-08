@@ -28,6 +28,7 @@ use ratatui::crossterm::event::{self, Event, KeyCode, KeyEventKind};
 use crate::app::{FileEntry, Session, Side};
 
 pub use chrome::draw;
+pub(crate) use theme::detect_light;
 
 /// 会话结束方式。
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -57,13 +58,15 @@ pub struct UiState {
 
 /// 运行交互会话直至完成或退出。
 ///
-/// `write_file` 负责把解决后的字节落盘(git 模式下还会顺带 `git add`)。
+/// `write_file` 负责把解决后的字节落盘(git 模式下还会顺带 `git add`);
+/// `light` 为 true 时使用浅色主题(适配浅色终端背景)。
 pub fn run_session(
     session: &mut Session,
     write_file: &mut dyn FnMut(&str, &[u8]) -> Result<()>,
+    light: bool,
 ) -> Result<Outcome> {
     let mut terminal = ratatui::init();
-    let result = event_loop(&mut terminal, session, write_file);
+    let result = event_loop(&mut terminal, session, write_file, light);
     ratatui::restore();
     result
 }
@@ -73,8 +76,12 @@ fn event_loop(
     terminal: &mut DefaultTerminal,
     session: &mut Session,
     write_file: &mut dyn FnMut(&str, &[u8]) -> Result<()>,
+    light: bool,
 ) -> Result<Outcome> {
-    let mut ui = UiState::default();
+    let mut ui = UiState {
+        theme: theme::Theme::select(light),
+        ..UiState::default()
+    };
     loop {
         terminal.draw(|frame| draw(frame, session, &mut ui))?;
         let Event::Key(key) = event::read()? else {

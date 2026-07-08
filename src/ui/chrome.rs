@@ -30,7 +30,7 @@ pub fn draw(frame: &mut Frame, session: &mut Session, ui: &mut UiState) {
     let file_idx = session.current;
     match session.current_file_mut() {
         FileEntry::Text(merge) => {
-            let highlight = ui.cache.get(file_idx, merge, ui.revision);
+            let highlight = ui.cache.get(file_idx, merge, ui.revision, ui.theme.light);
             draw_columns(frame, body, merge, folded, &ui.theme, highlight);
         }
         FileEntry::Binary {
@@ -235,7 +235,7 @@ fn draw_hints(frame: &mut Frame, area: Rect, theme: &Theme) {
         spans.push(keycap(key, theme));
         spans.push(Span::styled(
             format!(" {desc}  "),
-            Style::new().fg(theme.fg_dim),
+            Style::new().fg(theme.hint_fg),
         ));
     }
     frame.render_widget(Paragraph::new(Line::from(spans)), area);
