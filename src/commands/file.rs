@@ -19,10 +19,10 @@ pub struct FileArgs {
 /// 运行单文件冲突解决。
 pub fn run(args: FileArgs, light: bool) -> Result<()> {
     let text = std::fs::read_to_string(&args.path)
-        .with_context(|| format!("读取 {} 失败", args.path.display()))?;
+        .with_context(|| format!("failed to read {}", args.path.display()))?;
     let result = parse_conflict_file(&text)?;
     println!(
-        "[git-pincer] 解析到 {} 处冲突,进入解决界面…",
+        "[git-pincer] Parsed conflict at {}, entering resolution interface…",
         result.conflicts
     );
 
@@ -39,8 +39,8 @@ pub fn run(args: FileArgs, light: bool) -> Result<()> {
         light,
     )?;
     match outcome {
-        Outcome::Completed => println!("[git-pincer] ✔ 已写回 {display}"),
-        Outcome::Quit => println!("[git-pincer] 已退出,文件未修改"),
+        Outcome::Completed => println!("[git-pincer] ✔ written {display}"),
+        Outcome::Quit => println!("[git-pincer] exited without changes"),
     }
     Ok(())
 }

@@ -12,12 +12,12 @@ pub fn run(verbose: bool, dir: &Path) -> Result<()> {
     let git = Git::discover(dir, verbose)?;
     let state = git.state()?;
     if state == RepoState::Clean {
-        println!("[git-pincer] 当前没有进行中的 merge / rebase");
+        println!("[git-pincer] no conflict resolution in progress");
         return Ok(());
     }
 
     print!(
-        "确定要中止当前 {} 吗?已解决的进度将丢失 [y/N] ",
+        "Are you sure you want to abort the current {}? Completed progress will be lost. [Y/N]",
         state.op_name()
     );
     io::stdout().flush()?;
@@ -25,9 +25,9 @@ pub fn run(verbose: bool, dir: &Path) -> Result<()> {
     io::stdin().lock().read_line(&mut answer)?;
     if answer.trim().eq_ignore_ascii_case("y") {
         git.abort_op(state)?;
-        println!("[git-pincer] ✔ 已中止 {}", state.op_name());
+        println!("[git-pincer] ✔ aborted {}", state.op_name());
     } else {
-        println!("[git-pincer] 已取消");
+        println!("[git-pincer] cancelled");
     }
     Ok(())
 }

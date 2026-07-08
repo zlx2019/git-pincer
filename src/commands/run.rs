@@ -88,7 +88,7 @@ fn launch(initial: &[&str], verbose: bool, dir: &Path, light: bool) -> Result<()
     }
     if git.conflicted_files()?.is_empty() {
         bail!(
-            "git {} 失败(并非冲突导致),请查看上方 git 输出",
+            "git {} execution failed, please check the Git output messages",
             initial.join(" ")
         );
     }
