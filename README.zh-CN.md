@@ -1,3 +1,7 @@
+<p align="center">
+  <img src="./assets/logo.gif" width="320" alt="git-pincer logo">
+</p>
+
 # git-pincer
 
 [![CI](https://github.com/zlx2019/git-pincer/actions/workflows/ci.yml/badge.svg)](https://github.com/zlx2019/git-pincer/actions/workflows/ci.yml)
@@ -6,22 +10,11 @@
 
 [English](./README.md) | **简体中文**
 
-> 终端里的 IDEA 风格三栏 Git 冲突解决工具。
+> **「蟹钳」**，一个使用 Rust 编写的 Git 终端工具，专注于帮助开发者更轻松地解决 Git Merge、Rebase、Cherry-pick 等场景下的代码冲突。
 
-`git-pincer` 让合并冲突不再痛苦:通过它发起 `merge / rebase / pull / cherry-pick / revert`(或在任何冲突发生后再调用),在三栏 TUI 中逐块解决冲突,随后由它驱动 `git add` + `--continue` 循环,直到仓库回到干净状态 —— 多提交 cherry-pick 与多轮 rebase 也不例外。
+项目名称来源于 Rust 的吉祥物——螃蟹。Git 冲突就像两个分支同时「夹住」了同一段代码，而蟹钳象征着稳定、精准与掌控。希望它能够像一只可靠的蟹钳，帮助开发者牢牢抓住冲突双方，更高效地理解差异、完成合并。
 
-<!-- TODO: 替换为真实截图 / GIF -->
-
-```text
- ⚑ MERGE ▏█████░░░░░ 2/5 文件 ▏src/app.rs ▏✗ 2 冲突待解决
-╭ LOCAL · feature ────╮╭ RESULT ───────╮╭ REMOTE · main ─────╮
-│  8 » fn new() {     ││  8 ⋯ 待解决 ⋯ ││  8 « fn make() {   │
-│    »   init()       ││               ││    «   setup()     │
-│  ✓ 已解决的块色带消失,gutter 保留 ✓                       │
-│ ────── ⋯ 12 行未改动 (z 展开) ⋯ ──────                    │
-╰─────────────────────╯╰───────────────╯╰────────────────────╯
-  h 取本地 · l 取远端 · x 忽略 · e 编辑 · ? 帮助
-```
+![git-pincer 三栏合并界面](./assets/demo.png)
 
 ## 特性
 
@@ -84,6 +77,7 @@ cp fixtures/conflict.txt /tmp/ && git-pincer file /tmp/conflict.txt
 | `l` / `→` | 取用远端侧 |
 | `x` | 忽略当前块剩余未处理的侧(保留 base) |
 | `u` | 撤销当前块的全部决定 |
+| `U` | 撤销当前文件的全部决定 |
 | `e` | 用 `$EDITOR` 编辑当前块 |
 | `a` | 一键应用所有非冲突改动 |
 | `j` / `k` | 移动到下一个 / 上一个改动块 |

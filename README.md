@@ -1,3 +1,7 @@
+<p align="center">
+  <img src="./assets/logo.gif" width="320" alt="git-pincer logo">
+</p>
+
 # git-pincer
 
 [![CI](https://github.com/zlx2019/git-pincer/actions/workflows/ci.yml/badge.svg)](https://github.com/zlx2019/git-pincer/actions/workflows/ci.yml)
@@ -6,22 +10,11 @@
 
 **English** | [简体中文](./README.zh-CN.md)
 
-> An IDEA-style three-pane Git conflict resolver that lives in your terminal.
+> **"Pincer"** — a Git terminal tool written in Rust, focused on helping developers resolve code conflicts in Git merge, rebase, cherry-pick and similar scenarios with ease.
 
-`git-pincer` takes the pain out of merge conflicts: launch `merge / rebase / pull / cherry-pick / revert` through it (or invoke it after any conflict happens), resolve every conflict chunk by chunk in a three-pane TUI, and let it drive `git add` + `--continue` loops until the repository is clean again — including multi-round rebase and cherry-pick sequences.
+The name comes from Rust's mascot — the crab. A Git conflict is like two branches "pinching" the same piece of code at the same time, while a crab's pincer stands for stability, precision and control. May it work like a trusty pincer: gripping both sides of every conflict firmly, helping you understand the differences and complete the merge more efficiently.
 
-<!-- TODO: replace with a real screenshot / GIF -->
-
-```text
- ⚑ MERGE ▏█████░░░░░ 2/5 files ▏src/app.rs ▏✗ 2 conflicts
-╭ LOCAL · feature ────╮╭ RESULT ───────╮╭ REMOTE · main ─────╮
-│  8 » fn new() {     ││  8 ⋯ pending ⋯││  8 « fn make() {   │
-│    »   init()       ││               ││    «   setup()     │
-│  ✓ resolved chunks lose their band, the gutter keeps ✓    │
-│ ────── ⋯ 12 unchanged lines (press z to expand) ⋯ ──────  │
-╰─────────────────────╯╰───────────────╯╰────────────────────╯
-  h take local · l take remote · x ignore · e edit · ? help
-```
+![git-pincer three-pane merge UI](./assets/demo.png)
 
 ## Features
 
@@ -84,6 +77,7 @@ cp fixtures/conflict.txt /tmp/ && git-pincer file /tmp/conflict.txt
 | `l` / `→` | Take the remote side |
 | `x` | Ignore the remaining pending sides of the current chunk (keep base) |
 | `u` | Undo all decisions on the current chunk |
+| `U` | Undo all decisions in the current file |
 | `e` | Edit the current chunk in `$EDITOR` |
 | `a` | Apply every non-conflicting change at once |
 | `j` / `k` | Move to the next / previous change chunk |
