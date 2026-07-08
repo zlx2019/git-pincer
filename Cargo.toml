@@ -1,11 +1,11 @@
 [package]
-name = "git-peace"
+name = "git-pincer"
 version = "0.1.0"
 edition = "2024"
 rust-version = "1.96.0"
 authors = ["Zero <1143967454@qq.com>"]
 description = "A simple and compact Git CLI, mainly used for resolving conflicts."
-documentation = "https://docs.rs/git-peace"
+documentation = "https://docs.rs/git-pincer"
 homepage = "https://github.com/zlx2019/git-peace"
 repository = "https://github.com/zlx2019/git-peace"
 readme = "README.md"

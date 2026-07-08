@@ -12,7 +12,7 @@
 use std::path::PathBuf;
 use std::process::Command;
 
-use git_peace::git::{Git, GitError, RepoState};
+use git_pincer::git::{Git, GitError, RepoState};
 
 /// 临时 git 仓库守卫:Drop 时清理目录。
 ///
@@ -40,7 +40,7 @@ impl TempRepo {
     /// 新建并初始化仓库(局部配置身份信息、关闭签名)。
     fn new(name: &str) -> Self {
         let dir =
-            std::env::temp_dir().join(format!("git-peace-test-{}-{name}", std::process::id()));
+            std::env::temp_dir().join(format!("git-pincer-test-{}-{name}", std::process::id()));
         let _ = std::fs::remove_dir_all(&dir);
         std::fs::create_dir_all(&dir).unwrap();
         let repo = Self { dir };
@@ -211,7 +211,7 @@ fn continue_failure_keeps_merging_state() {
 
 #[test]
 fn discover_fails_outside_repo() {
-    let dir = std::env::temp_dir().join(format!("git-peace-test-{}-plain", std::process::id()));
+    let dir = std::env::temp_dir().join(format!("git-pincer-test-{}-plain", std::process::id()));
     let _ = std::fs::remove_dir_all(&dir);
     std::fs::create_dir_all(&dir).unwrap();
     let result = Git::discover(&dir, false);
@@ -333,7 +333,7 @@ fn try_launch_reports_failure_without_bailing() {
     repo.write("a.txt", "one\n");
     repo.commit_all("init");
 
-    let reason = git_peace::commands::run::try_launch(&["pull"], false, &repo.dir, false).unwrap();
+    let reason = git_pincer::commands::run::try_launch(&["pull"], false, &repo.dir, false).unwrap();
     let reason = reason.expect("无远程仓库的 pull 应返回失败原因");
     assert!(!reason.is_empty());
 }

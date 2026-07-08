@@ -22,7 +22,7 @@ pub fn run(args: FileArgs, light: bool) -> Result<()> {
         .with_context(|| format!("读取 {} 失败", args.path.display()))?;
     let result = parse_conflict_file(&text)?;
     println!(
-        "[git-peace] 解析到 {} 处冲突,进入解决界面…",
+        "[git-pincer] 解析到 {} 处冲突,进入解决界面…",
         result.conflicts
     );
 
@@ -39,8 +39,8 @@ pub fn run(args: FileArgs, light: bool) -> Result<()> {
         light,
     )?;
     match outcome {
-        Outcome::Completed => println!("[git-peace] ✔ 已写回 {display}"),
-        Outcome::Quit => println!("[git-peace] 已退出,文件未修改"),
+        Outcome::Completed => println!("[git-pincer] ✔ 已写回 {display}"),
+        Outcome::Quit => println!("[git-pincer] 已退出,文件未修改"),
     }
     Ok(())
 }

@@ -1,4 +1,4 @@
-//! 裸 `git-peace` 入口:有冲突现场直接接管,仓库干净时弹出交互式操作菜单。
+//! 裸 `git-pincer` 入口:有冲突现场直接接管,仓库干净时弹出交互式操作菜单。
 
 use std::io::IsTerminal;
 use std::path::Path;
@@ -17,7 +17,7 @@ const COMMIT_LIMIT: usize = 50;
 /// 运行裸命令入口:接管现场或进入菜单。
 pub fn run(verbose: bool, dir: &Path, light: bool) -> Result<()> {
     let git = Git::discover(dir, verbose)?;
-    // 有冲突现场直接接管,保持「撞冲突后直接敲 git-peace」的既有体验
+    // 有冲突现场直接接管,保持「撞冲突后直接敲 git-pincer」的既有体验
     if !git.conflicted_files()?.is_empty() || git.state()? != RepoState::Clean {
         return resolve_loop(&git, light);
     }
@@ -43,7 +43,7 @@ fn menu_loop(git: &Git, verbose: bool, dir: &Path, light: bool) -> Result<()> {
     .collect();
 
     loop {
-        let Some(action) = ui::pick("git-peace", &actions, light, true)? else {
+        let Some(action) = ui::pick("git-pincer", &actions, light, true)? else {
             return Ok(());
         };
         // 组装要执行的 git 命令;二级选择取消则回到一级菜单

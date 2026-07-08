@@ -80,7 +80,7 @@ pub fn revert(args: RevertArgs, verbose: bool, dir: &Path, light: bool) -> Resul
 /// 共享编排:透传执行 git 操作;干净则结束,产生冲突则进入解决循环。
 fn launch(initial: &[&str], verbose: bool, dir: &Path, light: bool) -> Result<()> {
     let git = Git::discover(dir, verbose)?;
-    println!("[git-peace] $ git {}", initial.join(" "));
+    println!("[git-pincer] $ git {}", initial.join(" "));
     let status = git.run_inherit(initial)?;
     if status.success() {
         // git 已输出自身的合并结果,不再重复旁白
@@ -108,7 +108,7 @@ pub fn try_launch(
     light: bool,
 ) -> Result<Option<String>> {
     let git = Git::discover(dir, verbose)?;
-    println!("[git-peace] $ git {}", initial.join(" "));
+    println!("[git-pincer] $ git {}", initial.join(" "));
     let out = git.run(initial)?;
     let replay = || {
         print!("{}", String::from_utf8_lossy(&out.stdout));
@@ -119,7 +119,7 @@ pub fn try_launch(
         return Ok(None);
     }
     if git.conflicted_files()?.is_empty() {
-        println!("[git-peace] ✗ git {} 失败", initial.join(" "));
+        println!("[git-pincer] ✗ git {} 失败", initial.join(" "));
         let stderr = String::from_utf8_lossy(&out.stderr).trim().to_owned();
         let stdout = String::from_utf8_lossy(&out.stdout).trim().to_owned();
         let reason = if stderr.is_empty() { stdout } else { stderr };

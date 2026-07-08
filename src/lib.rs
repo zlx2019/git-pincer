@@ -1,4 +1,4 @@
-//! git-peace: a Git conflict-resolution tool that lives in your terminal.
+//! git-pincer: a Git conflict-resolution tool that lives in your terminal.
 //!
 //! Provides an IDEA-style three-pane conflict resolution TUI (local | result | remote),
 //! and can also launch `merge / rebase / pull / cherry-pick / revert` directly,

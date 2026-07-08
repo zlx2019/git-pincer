@@ -12,7 +12,7 @@ pub fn run(verbose: bool, dir: &Path) -> Result<()> {
     let git = Git::discover(dir, verbose)?;
     let state = git.state()?;
     if state == RepoState::Clean {
-        println!("[git-peace] 当前没有进行中的 merge / rebase");
+        println!("[git-pincer] 当前没有进行中的 merge / rebase");
         return Ok(());
     }
 
@@ -25,9 +25,9 @@ pub fn run(verbose: bool, dir: &Path) -> Result<()> {
     io::stdin().lock().read_line(&mut answer)?;
     if answer.trim().eq_ignore_ascii_case("y") {
         git.abort_op(state)?;
-        println!("[git-peace] ✔ 已中止 {}", state.op_name());
+        println!("[git-pincer] ✔ 已中止 {}", state.op_name());
     } else {
-        println!("[git-peace] 已取消");
+        println!("[git-pincer] 已取消");
     }
     Ok(())
 }
