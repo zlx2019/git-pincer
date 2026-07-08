@@ -30,6 +30,22 @@ pub struct PullArgs {
     pub args: Vec<String>,
 }
 
+/// cherry-pick 子命令参数(全部透传,可带多个提交与选项)。
+#[derive(Debug, Args)]
+pub struct CherryPickArgs {
+    /// 透传给 git cherry-pick 的参数,如 `abc123` / `-x A B`
+    #[arg(trailing_var_arg = true, allow_hyphen_values = true, required = true)]
+    pub args: Vec<String>,
+}
+
+/// revert 子命令参数(全部透传,可带多个提交与选项)。
+#[derive(Debug, Args)]
+pub struct RevertArgs {
+    /// 透传给 git revert 的参数,如 `abc123` / `HEAD~2..HEAD`
+    #[arg(trailing_var_arg = true, allow_hyphen_values = true, required = true)]
+    pub args: Vec<String>,
+}
+
 /// 执行 `git merge` 并接管冲突解决。
 pub fn merge(args: MergeArgs, verbose: bool, dir: &Path, light: bool) -> Result<()> {
     launch(&["merge", "--no-edit", &args.target], verbose, dir, light)
@@ -47,13 +63,27 @@ pub fn pull(args: PullArgs, verbose: bool, dir: &Path, light: bool) -> Result<()
     launch(&cmd, verbose, dir, light)
 }
 
+/// 执行 `git cherry-pick`(参数透传)并接管冲突解决(多提交会多轮循环)。
+pub fn cherry_pick(args: CherryPickArgs, verbose: bool, dir: &Path, light: bool) -> Result<()> {
+    let mut cmd = vec!["cherry-pick"];
+    cmd.extend(args.args.iter().map(String::as_str));
+    launch(&cmd, verbose, dir, light)
+}
+
+/// 执行 `git revert`(参数透传)并接管冲突解决。
+pub fn revert(args: RevertArgs, verbose: bool, dir: &Path, light: bool) -> Result<()> {
+    let mut cmd = vec!["revert", "--no-edit"];
+    cmd.extend(args.args.iter().map(String::as_str));
+    launch(&cmd, verbose, dir, light)
+}
+
 /// 共享编排:透传执行 git 操作;干净则结束,产生冲突则进入解决循环。
 fn launch(initial: &[&str], verbose: bool, dir: &Path, light: bool) -> Result<()> {
     let git = Git::discover(dir, verbose)?;
     println!("[git-peace] $ git {}", initial.join(" "));
     let status = git.run_inherit(initial)?;
     if status.success() {
-        println!("[git-peace] ✔ 完成,无冲突");
+        // git 已输出自身的合并结果,不再重复旁白
         return Ok(());
     }
     if git.conflicted_files()?.is_empty() {

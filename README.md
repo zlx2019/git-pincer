@@ -6,12 +6,12 @@
 
 > A simple and compact Git CLI, mainly used for resolving conflicts.
 
-终端里的 Git 冲突解决工具:IDEA 风格的三栏合并 TUI(本地 | 结果 | 远端),可直接发起 `merge / rebase / pull` 并接管随后的全部冲突解决流程。
+终端里的 Git 冲突解决工具:IDEA 风格的三栏合并 TUI(本地 | 结果 | 远端),可直接发起 `merge / rebase / pull / cherry-pick / revert` 并接管随后的全部冲突解决流程。
 
 ## Features
 
 - **三栏冲突解决 TUI**:块级色带按改动类型着色(IDEA 语义:蓝=修改、绿=新增、灰=删除、红=冲突),`h/l` 取用本地/远端(冲突两侧先后取用即「两者都要」),`x` 忽略、`u` 撤销、`e` 调 `$EDITOR` 手动编辑
-- **现代终端视觉**:圆角边框面板 + IDEA 式 gutter 操作符号(`»«✓✗`)+ delta 式词级差异高亮 + syntect 语法着色(Maple 主题,按扩展名,超大文件自动降级);深浅双主题,`--light / --dark` 手动指定或经 `COLORFGBG` 自动检测
+- **现代终端视觉**:圆角边框面板 + IDEA 式 gutter 操作符号(`»«✓✗`)+ delta 式词级差异高亮 + syntect 语法着色(Maple 主题,按扩展名,超大文件自动降级);深浅双主题,`--theme <auto|dark|light>` 指定(auto 经 `COLORFGBG` 自动检测)
 - **接管完整流程**:解决全部文件后自动 `git add` + `--continue`,rebase 多轮冲突自动循环,直到仓库回到干净状态
 - **diff3 三方合并算法**:两次 2-way diff 分块归组,保守碰撞策略(宁多报冲突,不静默错合)
 - **原生 git CLI 交互**:shell out 执行(与 lazygit / IDEA 同路),认证、hooks、merge 策略、rerere 全部继承用户配置
@@ -20,12 +20,14 @@
 ## 用法
 
 ```bash
-git-peace                    # 接管当前仓库已有的冲突(git pull 撞冲突后直接敲)
-git-peace merge <branch>     # 执行 git merge 并接管冲突解决
-git-peace rebase <branch>    # 执行 git rebase,多轮冲突自动循环
-git-peace pull origin main   # 参数透传给 git pull
-git-peace file conflict.txt  # 免 git:解析带冲突标记的单个文件,解决后写回
-git-peace abort              # 中止进行中的 merge / rebase
+git-peace                      # 接管当前仓库已有的冲突(pull / stash pop / checkout -m 等撞冲突后直接敲)
+git-peace merge <branch>       # 执行 git merge 并接管冲突解决
+git-peace rebase <branch>      # 执行 git rebase,多轮冲突自动循环
+git-peace pull origin main     # 参数透传给 git pull
+git-peace cherry-pick <commit> # 执行 git cherry-pick(多提交多轮循环)
+git-peace revert <commit>      # 执行 git revert 并接管冲突解决
+git-peace file conflict.txt    # 免 git:解析带冲突标记的单个文件,解决后写回
+git-peace abort                # 中止进行中的合并操作(merge / rebase / cherry-pick / revert / am)
 ```
 
 TUI 内按 `?` 查看全部按键。试玩:`cp fixtures/conflict.txt /tmp/ && cargo run -- file /tmp/conflict.txt`

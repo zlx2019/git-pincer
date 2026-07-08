@@ -21,6 +21,8 @@ mod panes;
 mod rows;
 mod theme;
 
+use std::io::IsTerminal;
+
 use anyhow::{Context, Result};
 use ratatui::DefaultTerminal;
 use ratatui::crossterm::event::{self, Event, KeyCode, KeyEventKind};
@@ -65,6 +67,11 @@ pub fn run_session(
     write_file: &mut dyn FnMut(&str, &[u8]) -> Result<()>,
     light: bool,
 ) -> Result<Outcome> {
+    // ratatui::init 在无 TTY 时会直接 panic,这里先行拦截给出可读错误
+    // (如在管道 / CI 中误运行时)
+    if !std::io::stdout().is_terminal() {
+        anyhow::bail!("打开冲突解决界面需要交互式终端(当前 stdout 不是 TTY)");
+    }
     let mut terminal = ratatui::init();
     let result = event_loop(&mut terminal, session, write_file, light);
     ratatui::restore();
