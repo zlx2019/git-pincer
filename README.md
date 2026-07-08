@@ -10,7 +10,8 @@
 
 ## Features
 
-- **三栏冲突解决 TUI**:块级色带(蓝=单侧改动、绿=双方一致、红=冲突),`h/l` 取用本地/远端(冲突两侧先后取用即「两者都要」),`x` 忽略、`u` 撤销、`e` 调 `$EDITOR` 手动编辑
+- **三栏冲突解决 TUI**:块级色带按改动类型着色(IDEA 语义:蓝=修改、绿=新增、灰=删除、红=冲突),`h/l` 取用本地/远端(冲突两侧先后取用即「两者都要」),`x` 忽略、`u` 撤销、`e` 调 `$EDITOR` 手动编辑
+- **现代终端视觉**:圆角边框面板 + IDEA 式 gutter 操作符号(`»«✓✗`)+ delta 式词级差异高亮 + syntect 语法着色(按扩展名,超大文件自动降级)
 - **接管完整流程**:解决全部文件后自动 `git add` + `--continue`,rebase 多轮冲突自动循环,直到仓库回到干净状态
 - **diff3 三方合并算法**:两次 2-way diff 分块归组,保守碰撞策略(宁多报冲突,不静默错合)
 - **原生 git CLI 交互**:shell out 执行(与 lazygit / IDEA 同路),认证、hooks、merge 策略、rerere 全部继承用户配置
@@ -81,7 +82,8 @@ src/
 ├── merge.rs          diff3 三方合并核心与冲突标记解析(纯逻辑)
 ├── git.rs            原生 git CLI 薄封装(shell out)
 ├── app.rs            冲突解决会话状态机(纯逻辑)
-└── ui.rs             ratatui 三栏渲染与按键循环
+└── ui/               ratatui 渲染层:mod 事件循环 / theme 配色 / rows 行构建
+                      / highlight 词级+语法高亮缓存 / panes 三栏面板 / chrome 状态栏等
 tests/git_flow.rs     集成测试:临时真实 git 仓库验证全流程
 ```
 
