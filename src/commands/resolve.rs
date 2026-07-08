@@ -1,22 +1,11 @@
-//! Take over the conflicts already present in a repository
-//! (also the shared orchestration core behind merge / rebase / pull).
+//! The shared conflict-resolution loop behind every entry point
+//! (bare invocation, merge / rebase / pull / cherry-pick / revert).
 
 use anyhow::{Result, bail};
-use std::path::Path;
 
 use crate::app::{FileEntry, FileMerge, Session};
 use crate::git::{ConflictedFile, Git, RepoState};
 use crate::ui::{self, Outcome};
-
-/// 处理仓库中产生冲突的文件
-pub fn run(verbose: bool, dir: &Path, light: bool) -> Result<()> {
-    let git = Git::discover(dir, verbose)?;
-    if git.conflicted_files()?.is_empty() && git.state()? == RepoState::Clean {
-        println!("Currently, there are no conflicts that need to be resolved.");
-        return Ok(());
-    }
-    resolve_loop(&git, light)
-}
 
 /// 冲突解决主循环:解决全部文件 → `--continue` → 重新探测,
 /// 直到仓库回到干净状态(rebase 可能经历多轮冲突)。

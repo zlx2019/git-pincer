@@ -38,6 +38,8 @@ pub(crate) struct Theme {
     pub(crate) keycap_bg: Color,
     /// 提示条描述文字(比 fg_dim 亮一档,保证可读)
     pub(crate) hint_fg: Color,
+    /// 菜单 logo 中无自带颜色字符的着色(Rust 橙)
+    pub(crate) logo: Color,
     /// 结果栏「待解决」占位文字
     pub(crate) placeholder_fg: Color,
     /// 色带背景:修改(普通, 选中)
@@ -84,6 +86,7 @@ impl Theme {
             keycap_fg: term_color(205, 214, 244),
             keycap_bg: term_color(45, 50, 66),
             hint_fg: term_color(170, 178, 196),
+            logo: term_color(255, 118, 48),
             placeholder_fg: term_color(196, 132, 138),
             band_modified: (term_color(28, 39, 58), term_color(45, 64, 96)),
             band_added: (term_color(26, 42, 31), term_color(40, 66, 48)),
@@ -112,6 +115,7 @@ impl Theme {
             keycap_fg: term_color(30, 41, 59),
             keycap_bg: term_color(226, 230, 238),
             hint_fg: term_color(71, 85, 105),
+            logo: term_color(214, 77, 0),
             placeholder_fg: term_color(158, 70, 76),
             band_modified: (term_color(219, 233, 249), term_color(196, 219, 244)),
             band_added: (term_color(222, 240, 216), term_color(200, 229, 192)),

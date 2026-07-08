@@ -299,3 +299,41 @@ fn am_state_detected_distinct_from_rebase() {
     git.abort_op(RepoState::Am).unwrap();
     assert_eq!(git.state().unwrap(), RepoState::Clean);
 }
+
+/// 菜单数据源:分支列表排除当前分支,提交列表按是否在 HEAD 上过滤
+#[test]
+fn lists_branches_and_recent_commits() {
+    let repo = TempRepo::new("listing");
+    repo.write("a.txt", "one\n");
+    repo.commit_all("first");
+    repo.git(&["checkout", "-b", "feature"]);
+    repo.write("a.txt", "two\n");
+    repo.commit_all("feature only");
+    repo.git(&["checkout", "main"]);
+
+    let git = Git::discover(&repo.dir, false).unwrap();
+    let branches = git.list_branches().unwrap();
+    assert!(branches.contains(&"feature".to_owned()));
+    assert!(!branches.contains(&"main".to_owned()), "当前分支应被排除");
+
+    let own = git.recent_commits(false, 10).unwrap();
+    assert!(own.iter().any(|l| l.contains("first")));
+    let others = git.recent_commits(true, 10).unwrap();
+    assert!(others.iter().any(|l| l.contains("feature only")));
+    assert!(
+        !others.iter().any(|l| l.contains("first")),
+        "HEAD 可达的提交应被排除"
+    );
+}
+
+/// 菜单模式执行:非冲突失败返回原因文本(弹框数据源)而非直接报错
+#[test]
+fn try_launch_reports_failure_without_bailing() {
+    let repo = TempRepo::new("trylaunch");
+    repo.write("a.txt", "one\n");
+    repo.commit_all("init");
+
+    let reason = git_peace::commands::run::try_launch(&["pull"], false, &repo.dir, false).unwrap();
+    let reason = reason.expect("无远程仓库的 pull 应返回失败原因");
+    assert!(!reason.is_empty());
+}
