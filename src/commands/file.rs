@@ -22,7 +22,7 @@ pub fn run(args: FileArgs, light: bool) -> Result<()> {
         .with_context(|| format!("failed to read {}", args.path.display()))?;
     let result = parse_conflict_file(&text)?;
     println!(
-        "[git-pincer] Parsed conflict at {}, entering resolution interface…",
+        "[git-pincer] Parsed {} conflicts, entering resolution interface…",
         result.conflicts
     );
 
