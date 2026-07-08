@@ -31,24 +31,24 @@ pub struct PullArgs {
 }
 
 /// 执行 `git merge` 并接管冲突解决。
-pub fn merge(args: MergeArgs, verbose: bool, dir: &Path) -> Result<()> {
-    launch(&["merge", "--no-edit", &args.target], verbose, dir)
+pub fn merge(args: MergeArgs, verbose: bool, dir: &Path, light: bool) -> Result<()> {
+    launch(&["merge", "--no-edit", &args.target], verbose, dir, light)
 }
 
 /// 执行 `git rebase` 并接管冲突解决。
-pub fn rebase(args: RebaseArgs, verbose: bool, dir: &Path) -> Result<()> {
-    launch(&["rebase", &args.target], verbose, dir)
+pub fn rebase(args: RebaseArgs, verbose: bool, dir: &Path, light: bool) -> Result<()> {
+    launch(&["rebase", &args.target], verbose, dir, light)
 }
 
 /// 执行 `git pull`(参数透传)并接管冲突解决。
-pub fn pull(args: PullArgs, verbose: bool, dir: &Path) -> Result<()> {
+pub fn pull(args: PullArgs, verbose: bool, dir: &Path, light: bool) -> Result<()> {
     let mut cmd = vec!["pull"];
     cmd.extend(args.args.iter().map(String::as_str));
-    launch(&cmd, verbose, dir)
+    launch(&cmd, verbose, dir, light)
 }
 
 /// 共享编排:透传执行 git 操作;干净则结束,产生冲突则进入解决循环。
-fn launch(initial: &[&str], verbose: bool, dir: &Path) -> Result<()> {
+fn launch(initial: &[&str], verbose: bool, dir: &Path, light: bool) -> Result<()> {
     let git = Git::discover(dir, verbose)?;
     println!("[git-peace] $ git {}", initial.join(" "));
     let status = git.run_inherit(initial)?;
@@ -62,5 +62,5 @@ fn launch(initial: &[&str], verbose: bool, dir: &Path) -> Result<()> {
             initial.join(" ")
         );
     }
-    resolve_loop(&git)
+    resolve_loop(&git, light)
 }

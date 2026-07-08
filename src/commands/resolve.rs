@@ -9,18 +9,18 @@ use crate::git::{ConflictedFile, Git, RepoState};
 use crate::ui::{self, Outcome};
 
 /// `git-peace`(无子命令):接管指定仓库已有的冲突现场。
-pub fn run(verbose: bool, dir: &Path) -> Result<()> {
+pub fn run(verbose: bool, dir: &Path, light: bool) -> Result<()> {
     let git = Git::discover(dir, verbose)?;
     if git.conflicted_files()?.is_empty() && git.state()? == RepoState::Clean {
         println!("Currently, there are no conflicts that need to be resolved.");
         return Ok(());
     }
-    resolve_loop(&git)
+    resolve_loop(&git, light)
 }
 
 /// 冲突解决主循环:解决全部文件 → `--continue` → 重新探测,
 /// 直到仓库回到干净状态(rebase 可能经历多轮冲突)。
-pub fn resolve_loop(git: &Git) -> Result<()> {
+pub fn resolve_loop(git: &Git, light: bool) -> Result<()> {
     loop {
         let files = git.conflicted_files()?;
         if files.is_empty() {
@@ -56,10 +56,14 @@ pub fn resolve_loop(git: &Git) -> Result<()> {
 
         println!("[git-peace] {} 个文件存在冲突,进入解决界面…", files.len());
         let mut session = build_session(git, &files)?;
-        let outcome = ui::run_session(&mut session, &mut |path: &str, bytes: &[u8]| {
-            git.stage_resolved(path, bytes)?;
-            Ok(())
-        })?;
+        let outcome = ui::run_session(
+            &mut session,
+            &mut |path: &str, bytes: &[u8]| {
+                git.stage_resolved(path, bytes)?;
+                Ok(())
+            },
+            light,
+        )?;
         if outcome == Outcome::Quit {
             println!("[git-peace] 已退出,现场保留;随时运行 git-peace 继续,或 git-peace abort 中止");
             return Ok(());

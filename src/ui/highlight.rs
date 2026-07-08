@@ -38,79 +38,128 @@ fn syntax_set() -> &'static SyntaxSet {
     SET.get_or_init(SyntaxSet::load_defaults_newlines)
 }
 
-/// 进程级共享的 syntect 主题。
-fn syntect_theme() -> &'static SyntectTheme {
-    static THEME: OnceLock<SyntectTheme> = OnceLock::new();
-    THEME.get_or_init(maple_dark)
+/// 进程级共享的 syntect 主题(深 / 浅两套,各自惰性构建一次)。
+fn syntect_theme(light: bool) -> &'static SyntectTheme {
+    static DARK: OnceLock<SyntectTheme> = OnceLock::new();
+    static LIGHT: OnceLock<SyntectTheme> = OnceLock::new();
+    if light {
+        LIGHT.get_or_init(|| maple(true))
+    } else {
+        DARK.get_or_init(|| maple(false))
+    }
 }
 
-/// Maple Dark 主题(https://github.com/subframe7536/vscode-theme-maple)。
+/// RGB 三元组(语法配色表用)。
+type Rgb = (u8, u8, u8);
+
+/// scope 选择器 → (Maple Dark 前景色, Maple Light 前景色),
+/// 取自 maple-{dark,light}-color-theme.json 的 tokenColors。
+const TOKEN_COLORS: &[(&str, Rgb, Rgb)] = &[
+    (
+        "comment, punctuation.definition.comment",
+        (0x99, 0x99, 0x99),
+        (0x80, 0x80, 0x80),
+    ),
+    (
+        "punctuation, meta.brace, keyword.operator",
+        (0xb8, 0xd7, 0xf9),
+        (0x71, 0xa3, 0xa8),
+    ),
+    (
+        "keyword, storage, support.type.builtin",
+        (0xd2, 0xcc, 0xff),
+        (0x72, 0x62, 0x93),
+    ),
+    (
+        "constant, support.constant, variable.language",
+        (0xf0, 0xc0, 0xa8),
+        (0xc3, 0x75, 0x22),
+    ),
+    ("constant.numeric", (0xd5, 0xf2, 0x88), (0x73, 0x99, 0x00)),
+    ("constant.language", (0xd2, 0xcc, 0xff), (0x72, 0x62, 0x93)),
+    ("string", (0xa4, 0xdf, 0xae), (0x47, 0x8f, 0x14)),
+    (
+        "constant.character.escape",
+        (0x8f, 0xc7, 0xff),
+        (0x05, 0x85, 0xa8),
+    ),
+    (
+        "entity.name.function, support.function, variable.function, \
+         support.macro, entity.name.macro",
+        (0x8f, 0xc7, 0xff),
+        (0x05, 0x85, 0xa8),
+    ),
+    (
+        "entity.name.type, entity.name.class, entity.name.struct, entity.name.enum, \
+         entity.name.trait, entity.other.inherited-class, support.class, support.type",
+        (0xf0, 0xc0, 0xa8),
+        (0xc3, 0x75, 0x22),
+    ),
+    (
+        "variable, variable.parameter",
+        (0xee, 0xcf, 0xa0),
+        (0xaa, 0x83, 0x0e),
+    ),
+    (
+        "variable.other.member, meta.property-name, support.type.property-name",
+        (0xde, 0xd6, 0xcf),
+        (0x8d, 0x89, 0x49),
+    ),
+    ("entity.name.tag", (0xed, 0xab, 0xab), (0xbd, 0x51, 0x51)),
+    (
+        "entity.other.attribute-name",
+        (0xee, 0xcf, 0xa0),
+        (0xaa, 0x83, 0x0e),
+    ),
+    (
+        "entity.name.namespace, keyword.control.import, keyword.other.import, \
+         keyword.other.package",
+        (0xe3, 0xcb, 0xeb),
+        (0xa6, 0x59, 0x73),
+    ),
+    (
+        "markup.heading, entity.name.section",
+        (0xd2, 0xcc, 0xff),
+        (0x72, 0x62, 0x93),
+    ),
+    ("markup.quote", (0xa1, 0xe8, 0xe5), (0x12, 0x7d, 0x52)),
+    (
+        "markup.raw, markup.inline.raw",
+        (0xed, 0xab, 0xab),
+        (0xbd, 0x51, 0x51),
+    ),
+    ("markup.inserted", (0xa4, 0xdf, 0xae), (0x47, 0x8f, 0x14)),
+    ("markup.deleted", (0xed, 0xab, 0xab), (0xbd, 0x51, 0x51)),
+    (
+        "markup.bold, markup.italic",
+        (0xf0, 0xc0, 0xa8),
+        (0xc3, 0x75, 0x22),
+    ),
+    (
+        "markup.underline.link, string.other.link",
+        (0x8f, 0xc7, 0xff),
+        (0x05, 0x85, 0xa8),
+    ),
+];
+
+/// Maple 主题(https://github.com/subframe7536/vscode-theme-maple)。
 ///
 /// syntect 内置主题集中没有该主题,这里把其 tokenColors 的核心 scope
 /// 手工移植为代码内构建的 syntect Theme:只移植前景色(背景让位给色带),
 /// 不移植粗斜体。默认前景与 VSCode 版一致,渲染层会将其交回终端默认色。
-fn maple_dark() -> SyntectTheme {
-    /// scope 选择器 → 前景色,取自 maple-dark-color-theme.json
-    const TOKEN_COLORS: &[(&str, (u8, u8, u8))] = &[
-        (
-            "comment, punctuation.definition.comment",
-            (0x99, 0x99, 0x99),
-        ),
-        (
-            "punctuation, meta.brace, keyword.operator",
-            (0xb8, 0xd7, 0xf9),
-        ),
-        ("keyword, storage, support.type.builtin", (0xd2, 0xcc, 0xff)),
-        (
-            "constant, support.constant, variable.language",
-            (0xf0, 0xc0, 0xa8),
-        ),
-        ("constant.numeric", (0xd5, 0xf2, 0x88)),
-        ("constant.language", (0xd2, 0xcc, 0xff)),
-        ("string", (0xa4, 0xdf, 0xae)),
-        ("constant.character.escape", (0x8f, 0xc7, 0xff)),
-        (
-            "entity.name.function, support.function, variable.function, \
-             support.macro, entity.name.macro",
-            (0x8f, 0xc7, 0xff),
-        ),
-        (
-            "entity.name.type, entity.name.class, entity.name.struct, entity.name.enum, \
-             entity.name.trait, entity.other.inherited-class, support.class, support.type",
-            (0xf0, 0xc0, 0xa8),
-        ),
-        ("variable, variable.parameter", (0xee, 0xcf, 0xa0)),
-        (
-            "variable.other.member, meta.property-name, support.type.property-name",
-            (0xde, 0xd6, 0xcf),
-        ),
-        ("entity.name.tag", (0xed, 0xab, 0xab)),
-        ("entity.other.attribute-name", (0xee, 0xcf, 0xa0)),
-        (
-            "entity.name.namespace, keyword.control.import, keyword.other.import, \
-             keyword.other.package",
-            (0xe3, 0xcb, 0xeb),
-        ),
-        ("markup.heading, entity.name.section", (0xd2, 0xcc, 0xff)),
-        ("markup.quote", (0xa1, 0xe8, 0xe5)),
-        ("markup.raw, markup.inline.raw", (0xed, 0xab, 0xab)),
-        ("markup.inserted", (0xa4, 0xdf, 0xae)),
-        ("markup.deleted", (0xed, 0xab, 0xab)),
-        ("markup.bold, markup.italic", (0xf0, 0xc0, 0xa8)),
-        (
-            "markup.underline.link, string.other.link",
-            (0x8f, 0xc7, 0xff),
-        ),
-    ];
-
-    let rgb = |(r, g, b): (u8, u8, u8)| SyntectColor { r, g, b, a: 0xff };
+fn maple(light: bool) -> SyntectTheme {
+    let rgb = |(r, g, b): Rgb| SyntectColor { r, g, b, a: 0xff };
     let mut theme = SyntectTheme {
-        name: Some("Maple Dark".to_owned()),
+        name: Some(if light { "Maple Light" } else { "Maple Dark" }.to_owned()),
         ..SyntectTheme::default()
     };
-    // editor.foreground(#cbd5e1);渲染层会跳过等于默认前景的 token
-    theme.settings.foreground = Some(rgb((0xcb, 0xd5, 0xe1)));
-    for (scopes, color) in TOKEN_COLORS {
+    // editor.foreground(dark #cbd5e1 / light #475569);渲染层会跳过等于默认前景的 token
+    theme.settings.foreground = Some(rgb(if light {
+        (0x47, 0x55, 0x69)
+    } else {
+        (0xcb, 0xd5, 0xe1)
+    }));
+    for (scopes, dark, light_color) in TOKEN_COLORS {
         // scope 常量在编译期固定,解析失败直接跳过该条而非 panic
         let Ok(scope) = scopes.parse::<ScopeSelectors>() else {
             continue;
@@ -118,7 +167,7 @@ fn maple_dark() -> SyntectTheme {
         theme.scopes.push(ThemeItem {
             scope,
             style: StyleModifier {
-                foreground: Some(rgb(*color)),
+                foreground: Some(rgb(if light { *light_color } else { *dark })),
                 background: None,
                 font_style: None,
             },
@@ -156,23 +205,27 @@ pub(crate) struct FileHighlight {
     pub(crate) result: Option<PaneSyntax>,
     /// 匹配到的语法定义;None 表示该文件不做语法高亮
     syntax: Option<&'static SyntaxReference>,
+    /// 是否使用浅色语法主题(result 栏重算时沿用)
+    light: bool,
     /// result 栏所对应的状态修订号
     result_rev: u64,
 }
 
 impl FileHighlight {
     /// 构建文件的完整高亮信息。
-    fn build(merge: &FileMerge, rev: u64) -> Self {
+    fn build(merge: &FileMerge, rev: u64, light: bool) -> Self {
         let emphasis = merge.chunks.iter().map(chunk_emphasis).collect();
         let syntax = find_syntax(merge);
-        let highlight =
-            |lines: &mut dyn Iterator<Item = &String>| syntax.map(|s| highlight_pane(lines, s));
+        let highlight = |lines: &mut dyn Iterator<Item = &String>| {
+            syntax.map(|s| highlight_pane(lines, s, light))
+        };
         Self {
             emphasis,
             ours: highlight(&mut merge.chunks.iter().flat_map(|c| c.ours.iter())),
             theirs: highlight(&mut merge.chunks.iter().flat_map(|c| c.theirs.iter())),
-            result: syntax.map(|s| highlight_result(merge, s)),
+            result: syntax.map(|s| highlight_result(merge, s, light)),
             syntax,
+            light,
             result_rev: rev,
         }
     }
@@ -187,13 +240,21 @@ pub(crate) struct HighlightCache {
 impl HighlightCache {
     /// 取当前文件的高亮信息:首次访问时构建;
     /// revision 变化(取用 / 撤销 / 编辑)时只重算结果栏。
-    pub(crate) fn get(&mut self, file_idx: usize, merge: &FileMerge, rev: u64) -> &FileHighlight {
+    pub(crate) fn get(
+        &mut self,
+        file_idx: usize,
+        merge: &FileMerge,
+        rev: u64,
+        light: bool,
+    ) -> &FileHighlight {
         let entry = self
             .files
             .entry(file_idx)
-            .or_insert_with(|| FileHighlight::build(merge, rev));
+            .or_insert_with(|| FileHighlight::build(merge, rev, light));
         if entry.result_rev != rev {
-            entry.result = entry.syntax.map(|s| highlight_result(merge, s));
+            entry.result = entry
+                .syntax
+                .map(|s| highlight_result(merge, s, entry.light));
             entry.result_rev = rev;
         }
         entry
@@ -221,9 +282,10 @@ fn find_syntax(merge: &FileMerge) -> Option<&'static SyntaxReference> {
 fn highlight_pane(
     lines: &mut dyn Iterator<Item = &String>,
     syntax: &SyntaxReference,
+    light: bool,
 ) -> PaneSyntax {
     let set = syntax_set();
-    let theme = syntect_theme();
+    let theme = syntect_theme(light);
     // 等于主题默认前景的 token(普通标识符 / 标点)不产出着色段,
     // 交回终端默认前景,保持正文亮度;只有语义色 token(关键字 / 字符串等)上色
     let default_fg = theme.settings.foreground;
@@ -240,7 +302,7 @@ fn highlight_pane(
                 let clipped = end.min(line.len());
                 if clipped > pos && Some(style.foreground) != default_fg {
                     let fg = style.foreground;
-                    spans.push((Color::Rgb(fg.r, fg.g, fg.b), pos..clipped));
+                    spans.push((super::theme::term_color(fg.r, fg.g, fg.b), pos..clipped));
                 }
                 pos = end;
             }
@@ -251,11 +313,11 @@ fn highlight_pane(
 }
 
 /// 高亮结果栏的当前内容(按块拼接后的完整文档)。
-fn highlight_result(merge: &FileMerge, syntax: &SyntaxReference) -> PaneSyntax {
+fn highlight_result(merge: &FileMerge, syntax: &SyntaxReference, light: bool) -> PaneSyntax {
     let lines: Vec<String> = (0..merge.chunks.len())
         .flat_map(|i| merge.current_content(i))
         .collect();
-    highlight_pane(&mut lines.iter(), syntax)
+    highlight_pane(&mut lines.iter(), syntax, light)
 }
 
 /// 计算一个块的词级强调;稳定块与超大块返回全空。
@@ -418,12 +480,12 @@ mod tests {
             "fn main() { let a = 1; }\n",
             "fn main() {}\n",
         );
-        let hl = cache.get(0, &rs, 0);
+        let hl = cache.get(0, &rs, 0, false);
         let ours = hl.ours.as_ref().unwrap();
         assert!(ours.lines.iter().any(|l| !l.is_empty()));
 
         let unknown = FileMerge::from_three_way("demo.unknownext".to_owned(), "a\n", "b\n", "a\n");
-        let hl = cache.get(1, &unknown, 0);
+        let hl = cache.get(1, &unknown, 0, false);
         assert!(hl.ours.is_none());
         assert!(hl.result.is_none());
     }
@@ -434,11 +496,23 @@ mod tests {
         let mut merge =
             FileMerge::from_three_way("demo.rs".to_owned(), "a\nb\nc\n", "a\nX\nc\n", "a\nY\nc\n");
         let mut cache = HighlightCache::default();
-        let before = cache.get(0, &merge, 0).result.as_ref().unwrap().lines.len();
+        let before = cache
+            .get(0, &merge, 0, false)
+            .result
+            .as_ref()
+            .unwrap()
+            .lines
+            .len();
         // 冲突两侧都取用 → 结果行数 3 → 4
         merge.apply(crate::app::Side::Ours);
         merge.apply(crate::app::Side::Theirs);
-        let after = cache.get(0, &merge, 1).result.as_ref().unwrap().lines.len();
+        let after = cache
+            .get(0, &merge, 1, false)
+            .result
+            .as_ref()
+            .unwrap()
+            .lines
+            .len();
         assert_eq!(before, 3);
         assert_eq!(after, 4);
     }
@@ -449,7 +523,7 @@ mod tests {
         let text: String = (0..4000).map(|i| format!("l{i}\n")).collect();
         let merge = FileMerge::from_three_way("big.rs".to_owned(), &text, &text, &text);
         let mut cache = HighlightCache::default();
-        let hl = cache.get(0, &merge, 0);
+        let hl = cache.get(0, &merge, 0, false);
         assert!(hl.ours.is_none());
         // 词级强调不受影响(稳定块本就为空)
         assert_eq!(hl.emphasis.len(), merge.chunks.len());

@@ -24,6 +24,12 @@ pub struct Cli {
     /// 回显执行的 git 命令(可重复以提高级别,如 `-vv`)
     #[arg(short, long, global = true, action = clap::ArgAction::Count)]
     pub verbose: u8,
+    /// 使用浅色主题(适配浅色终端背景)
+    #[arg(long, global = true, conflicts_with = "dark")]
+    pub light: bool,
+    /// 使用深色主题(覆盖 COLORFGBG 自动检测;默认即深色)
+    #[arg(long, global = true)]
+    pub dark: bool,
 }
 
 /// 支持的子命令。
@@ -46,12 +52,20 @@ impl Cli {
     pub fn run(self) -> Result<()> {
         let verbose = self.verbose > 0;
         let dir = self.repo.unwrap_or_else(|| PathBuf::from("."));
+        // 主题变体:显式参数优先,否则按 COLORFGBG 推断(缺省深色)
+        let light = if self.light {
+            true
+        } else if self.dark {
+            false
+        } else {
+            crate::ui::detect_light()
+        };
         match self.command {
-            None => commands::resolve::run(verbose, &dir),
-            Some(Commands::Merge(args)) => commands::run::merge(args, verbose, &dir),
-            Some(Commands::Rebase(args)) => commands::run::rebase(args, verbose, &dir),
-            Some(Commands::Pull(args)) => commands::run::pull(args, verbose, &dir),
-            Some(Commands::File(args)) => commands::file::run(args),
+            None => commands::resolve::run(verbose, &dir, light),
+            Some(Commands::Merge(args)) => commands::run::merge(args, verbose, &dir, light),
+            Some(Commands::Rebase(args)) => commands::run::rebase(args, verbose, &dir, light),
+            Some(Commands::Pull(args)) => commands::run::pull(args, verbose, &dir, light),
+            Some(Commands::File(args)) => commands::file::run(args, light),
             Some(Commands::Abort) => commands::abort::run(verbose, &dir),
         }
     }
