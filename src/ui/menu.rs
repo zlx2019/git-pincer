@@ -186,6 +186,31 @@ impl MenuSession {
         self.terminal.clear()?;
         notice_loop(&mut self.terminal, title, body, &self.theme)
     }
+
+    /// 绘制一帧居中提示后立即返回(不等待按键),
+    /// 供随后的阻塞操作(如需要网络的 git 命令)期间维持画面反馈。
+    pub(crate) fn flash(&mut self, body: &str) -> Result<()> {
+        self.terminal.clear()?;
+        self.terminal.draw(|frame| {
+            let area = frame.area();
+            if area.height == 0 {
+                return;
+            }
+            let line_area = Rect {
+                x: area.x,
+                y: area.y + area.height / 2,
+                width: area.width,
+                height: 1,
+            };
+            frame.render_widget(
+                Paragraph::new(
+                    Line::styled(body.to_owned(), Style::new().fg(self.theme.amber)).centered(),
+                ),
+                line_area,
+            );
+        })?;
+        Ok(())
+    }
 }
 
 impl Drop for MenuSession {
@@ -250,17 +275,23 @@ fn draw_pick(
         })
         .max()
         .unwrap_or(0);
-    // 边框 2 + 左右内边距 4 + 选中符号 2
-    let width = ((content_w + 8) as u16).clamp(36, area.width.saturating_sub(4));
-    // 边框 2 + 上下内边距 2
-    let panel_h = (items.len() as u16 + 4)
-        .min(area.height.saturating_sub(2))
-        .max(5);
     // logo 画在菜单框上方,与菜单成组垂直居中;屏幕放不下时自动隐藏。
     // 逐行内容左缘对齐(整块统一偏移居中),避免行尾透明格差异造成错位
     let art = logo_art();
     let logo_w = art.iter().map(Line::width).max().unwrap_or(0) as u16;
     let logo_h = art.len() as u16 + 1;
+    // 边框 2 + 左右内边距 4 + 选中符号 2;主菜单加宽到与 logo 齐宽
+    let fit_w = (content_w + 8) as u16;
+    let width = if logo && !art.is_empty() {
+        fit_w.max(logo_w + 2)
+    } else {
+        fit_w.max(36)
+    }
+    .min(area.width.saturating_sub(4));
+    // 边框 2 + 上下内边距 2
+    let panel_h = (items.len() as u16 + 4)
+        .min(area.height.saturating_sub(2))
+        .max(5);
     let show_logo =
         logo && !art.is_empty() && area.height > panel_h + logo_h + 2 && area.width >= logo_w;
     let total_h = panel_h + if show_logo { logo_h } else { 0 };
@@ -302,14 +333,10 @@ fn draw_pick(
         height: panel_h,
     };
 
-    let block = Block::bordered()
+    let mut block = Block::bordered()
         .border_type(BorderType::Rounded)
         .border_style(Style::new().fg(theme.border))
         .padding(Padding::new(2, 2, 1, 1))
-        .title(Span::styled(
-            format!(" {} ", title.trim()),
-            Style::new().fg(theme.blue).add_modifier(Modifier::BOLD),
-        ))
         .title_bottom(
             Line::from(Span::styled(
                 " j/k 移动 · Enter 确认 · q 取消 ",
@@ -317,7 +344,16 @@ fn draw_pick(
             ))
             .centered(),
         );
+    // 标题可选:主菜单不设标题(logo 已表明身份),二级列表用标题说明语境
+    if !title.trim().is_empty() {
+        block = block.title(Span::styled(
+            format!(" {} ", title.trim()),
+            Style::new().fg(theme.blue).add_modifier(Modifier::BOLD),
+        ));
+    }
 
+    // 列表内容可用宽度 = 面板宽 - 边框 2 - 内边距 4 - 选中符号 2
+    let inner_w = width.saturating_sub(8) as usize;
     let rows: Vec<ListItem<'static>> = items
         .iter()
         .map(|item| {
@@ -330,7 +366,15 @@ fn draw_pick(
                 Style::new().fg(theme.blue),
             )];
             if !item.desc.is_empty() {
-                spans.push(Span::raw("  "));
+                // 主菜单标签与描述分居两端(面板宽);普通列表描述紧随标签
+                let gap = if logo {
+                    inner_w
+                        .saturating_sub(label_w + display_width(&item.desc))
+                        .max(2)
+                } else {
+                    2
+                };
+                spans.push(Span::raw(" ".repeat(gap)));
                 spans.push(Span::styled(
                     item.desc.clone(),
                     Style::new().fg(theme.hint_fg),

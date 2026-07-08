@@ -326,14 +326,17 @@ fn lists_branches_and_recent_commits() {
     );
 }
 
-/// 菜单模式执行:非冲突失败返回原因文本(弹框数据源)而非直接报错
+/// 菜单模式执行:非冲突失败返回 Failed(弹框数据源)而非直接报错
 #[test]
-fn try_launch_reports_failure_without_bailing() {
+fn launch_captured_reports_failure_without_bailing() {
     let repo = TempRepo::new("trylaunch");
     repo.write("a.txt", "one\n");
     repo.commit_all("init");
 
-    let reason = git_pincer::commands::run::try_launch(&["pull"], false, &repo.dir, false).unwrap();
-    let reason = reason.expect("无远程仓库的 pull 应返回失败原因");
-    assert!(!reason.is_empty());
+    let git = git_pincer::git::Git::discover(&repo.dir, false).unwrap();
+    let outcome = git_pincer::commands::run::launch_captured(&git, &["pull"]).unwrap();
+    match outcome {
+        git_pincer::commands::run::LaunchOutcome::Failed(reason) => assert!(!reason.is_empty()),
+        other => panic!("无远程仓库的 pull 应返回 Failed,实际为 {other:?}"),
+    }
 }
