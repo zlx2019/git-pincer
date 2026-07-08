@@ -22,7 +22,9 @@ jobs:
         uses: orhun/git-cliff-action@v4
         with:
           config: cliff.toml
-          args: --latest --strip header
+          # 正式版:--latest 取最近的正式版本节点(预发布不算节点,区间自动覆盖 rc 期间的提交);
+          # 预发布:标签不被 tag_pattern 识别,改用 --unreleased 并显式指定版本名
+          args: ${{ contains(github.ref_name, '-') && format('--unreleased --tag {0}', github.ref_name) || '--latest' }} --strip header
         env:
           OUTPUT: CHANGES.md
           GITHUB_REPO: ${{ github.repository }}
@@ -32,6 +34,8 @@ jobs:
         with:
           body_path: CHANGES.md
           token: ${{ secrets.GITHUB_TOKEN }}
+          # SemVer 预发布标签(含 "-",如 v0.1.0-rc.1)自动标记为 Pre-release
+          prerelease: ${{ contains(github.ref_name, '-') }}
 
   build:
     name: Build ${{ matrix.target }}

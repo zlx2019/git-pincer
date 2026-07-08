@@ -83,7 +83,9 @@ protect_breaking_commits = false
 # filter out the commits that are not matched by commit parsers
 filter_commits = false
 # regex for matching git tags
-tag_pattern = "v[0-9].*"
+# 只把正式版标签当作版本节点:预发布(v0.1.0-rc.1 等)不划分区间,
+# 正式版的 changelog 因此包含预发布期间的全部提交
+tag_pattern = "^v[0-9]+\\.[0-9]+\\.[0-9]+$"
 # regex for skipping tags
 skip_tags = ""
 # regex for ignoring tags
