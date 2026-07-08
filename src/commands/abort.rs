@@ -17,7 +17,7 @@ pub fn run(verbose: bool, dir: &Path) -> Result<()> {
     }
 
     print!(
-        "Are you sure you want to abort the current {}? Completed progress will be lost. [Y/N]",
+        "Are you sure you want to abort the current {}? Completed progress will be lost. [y/N] ",
         state.op_name()
     );
     io::stdout().flush()?;
