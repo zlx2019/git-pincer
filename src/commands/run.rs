@@ -94,3 +94,38 @@ fn launch(initial: &[&str], verbose: bool, dir: &Path, light: bool) -> Result<()
     }
     resolve_loop(&git, light)
 }
+
+/// 菜单模式编排:捕获输出执行 git 操作,非冲突失败返回 `Some(错误信息)`
+/// 供弹框展示而非终止程序;成功或冲突已解决返回 `None`。
+///
+/// 成功与冲突路径把捕获的 git 输出回放到终端(历史可查);
+/// 失败路径不回放详情——原因由弹框独家展示,历史只留一行结论,
+/// 避免同一份错误信息出现两遍。
+pub fn try_launch(
+    initial: &[&str],
+    verbose: bool,
+    dir: &Path,
+    light: bool,
+) -> Result<Option<String>> {
+    let git = Git::discover(dir, verbose)?;
+    println!("[git-peace] $ git {}", initial.join(" "));
+    let out = git.run(initial)?;
+    let replay = || {
+        print!("{}", String::from_utf8_lossy(&out.stdout));
+        eprint!("{}", String::from_utf8_lossy(&out.stderr));
+    };
+    if out.status.success() {
+        replay();
+        return Ok(None);
+    }
+    if git.conflicted_files()?.is_empty() {
+        println!("[git-peace] ✗ git {} 失败", initial.join(" "));
+        let stderr = String::from_utf8_lossy(&out.stderr).trim().to_owned();
+        let stdout = String::from_utf8_lossy(&out.stdout).trim().to_owned();
+        let reason = if stderr.is_empty() { stdout } else { stderr };
+        return Ok(Some(reason));
+    }
+    replay();
+    resolve_loop(&git, light)?;
+    Ok(None)
+}

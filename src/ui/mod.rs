@@ -17,6 +17,7 @@
 
 mod chrome;
 mod highlight;
+mod menu;
 mod panes;
 mod rows;
 mod theme;
@@ -30,6 +31,7 @@ use ratatui::crossterm::event::{self, Event, KeyCode, KeyEventKind};
 use crate::app::{FileEntry, Session, Side};
 
 pub use chrome::draw;
+pub(crate) use menu::{MenuItem, notice, pick};
 pub(crate) use theme::detect_light;
 
 /// 会话结束方式。

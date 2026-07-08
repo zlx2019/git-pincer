@@ -70,7 +70,7 @@ impl Cli {
             ThemeArg::Auto => crate::ui::detect_light(),
         };
         match self.command {
-            None => commands::resolve::run(verbose, &dir, light),
+            None => commands::menu::run(verbose, &dir, light),
             Some(Commands::Merge(args)) => commands::run::merge(args, verbose, &dir, light),
             Some(Commands::Rebase(args)) => commands::run::rebase(args, verbose, &dir, light),
             Some(Commands::Pull(args)) => commands::run::pull(args, verbose, &dir, light),

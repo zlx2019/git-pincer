@@ -211,6 +211,52 @@ impl Git {
         Ok(self.run_ok(&["show", &spec])?.stdout)
     }
 
+    /// 列出可作为 merge / rebase 目标的分支:本地 + 远程跟踪,
+    /// 排除当前分支与 HEAD 符号引用。
+    pub fn list_branches(&self) -> Result<Vec<String>, GitError> {
+        let current = {
+            let out = self.run_ok(&["branch", "--show-current"])?;
+            String::from_utf8_lossy(&out.stdout).trim().to_owned()
+        };
+        let queries: [&[&str]; 2] = [
+            &["branch", "--format=%(refname:short)"],
+            &["branch", "-r", "--format=%(refname:short)"],
+        ];
+        let mut branches = Vec::new();
+        for args in queries {
+            let out = self.run_ok(args)?;
+            for line in String::from_utf8_lossy(&out.stdout).lines() {
+                let name = line.trim();
+                if name.is_empty() || name == current || name.contains("HEAD") {
+                    continue;
+                }
+                branches.push(name.to_owned());
+            }
+        }
+        Ok(branches)
+    }
+
+    /// 最近提交列表(`--oneline` 行,首列为短 hash),提交选择器用。
+    ///
+    /// `others_only` 为 true 时只列不在当前分支上的提交(cherry-pick 候选),
+    /// 否则列当前分支的最近提交(revert 候选)。
+    /// 空仓库等无提交可列的场景返回空列表而非报错。
+    pub fn recent_commits(&self, others_only: bool, limit: usize) -> Result<Vec<String>, GitError> {
+        let n = format!("-n{limit}");
+        let mut args = vec!["log", "--oneline", &n];
+        if others_only {
+            args.extend(["--all", "--not", "HEAD"]);
+        }
+        let out = self.run(&args)?;
+        if !out.status.success() {
+            return Ok(Vec::new());
+        }
+        Ok(String::from_utf8_lossy(&out.stdout)
+            .lines()
+            .map(str::to_owned)
+            .collect())
+    }
+
     /// 将解决后的内容写入工作区文件并 `git add`。
     pub fn stage_resolved(&self, path: &str, content: &[u8]) -> Result<(), GitError> {
         std::fs::write(self.top.join(path), content)?;
