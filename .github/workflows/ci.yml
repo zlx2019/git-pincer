@@ -24,7 +24,7 @@ jobs:
     if: github.repository != 'zlx2019/rust-cli-template'
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
       - uses: actions-rust-lang/setup-rust-toolchain@v1
       - name: cargo fmt
         run: cargo fmt --all -- --check
@@ -37,7 +37,7 @@ jobs:
     if: github.repository != 'zlx2019/rust-cli-template'
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
       - uses: actions-rust-lang/setup-rust-toolchain@v1
       - uses: taiki-e/install-action@v2
         with:
@@ -51,7 +51,7 @@ jobs:
     if: github.repository != 'zlx2019/rust-cli-template'
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
       - uses: EmbarkStudios/cargo-deny-action@v2
 
   # 拼写检查
@@ -60,6 +60,6 @@ jobs:
     if: github.repository != 'zlx2019/rust-cli-template'
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
       # 锁定版本，避免上游 master 变更导致 CI 意外失败（dependabot 会定期升级）
       - uses: crate-ci/typos@v1.48.0
