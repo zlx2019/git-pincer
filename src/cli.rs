@@ -43,19 +43,19 @@ pub enum ThemeArg {
 /// 支持的子命令。
 #[derive(Debug, Subcommand)]
 pub enum Commands {
-    /// 执行 git merge(存在冲突则进行处理)
+    /// Execute the `git merge` command (Pass all parameters)
     Merge(commands::run::MergeArgs),
-    /// 执行 git rebase
+    /// Execute the `git rebase` command (Pass all parameters)
     Rebase(commands::run::RebaseArgs),
-    /// 执行 git pull
+    /// Execute the `git pull` command (Pass all parameters)
     Pull(commands::run::PullArgs),
-    /// 执行 git cherry-pick
+    /// Execute the `git cherry-pick` command (Pass all parameters)
     CherryPick(commands::run::CherryPickArgs),
-    /// 执行 git revert
+    /// Execute the `git revert` command (Pass all parameters)
     Revert(commands::run::RevertArgs),
-    /// 处理单个带有冲突标记的文件
+    /// Handling a single file with a conflict mark
     File(commands::file::FileArgs),
-    /// 中止进行中的合并操作(merge / rebase / cherry-pick / revert / am)
+    /// Cancel the ongoing merge operation (merge / rebase / cherry-pick / revert / am)
     Abort,
 }
 
