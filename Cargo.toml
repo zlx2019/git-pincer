@@ -10,6 +10,7 @@ repository = "https://github.com/zlx2019/git-pincer"
 readme = "README.md"
 license = "MIT"
 keywords = ["git", "git-cli", "tui"]
+include = ["/src", "/Cargo.toml", "/README.md", "/LICENSE"]
 
 [dependencies]
 clap = { version = "4", features = ["derive"] }
@@ -37,5 +38,9 @@ unwrap_used = "warn"
 members = []
 
 [profile.release]
+lto = "fat"
+codegen-units = 1
+strip = true
+panic = "abort"
 
 [profile.dev]

@@ -48,6 +48,13 @@ jobs:
         include:
           - target: x86_64-unknown-linux-gnu
             os: ubuntu-latest
+          # musl 静态链接:不依赖 glibc 版本,任何 Linux 发行版可用
+          - target: x86_64-unknown-linux-musl
+            os: ubuntu-latest
+          - target: aarch64-unknown-linux-gnu
+            os: ubuntu-latest
+          - target: x86_64-apple-darwin
+            os: macos-latest
           - target: aarch64-apple-darwin
             os: macos-latest
           - target: x86_64-pc-windows-msvc
@@ -55,6 +62,12 @@ jobs:
     steps:
       - uses: actions/checkout@v4
       - uses: actions-rust-lang/setup-rust-toolchain@v1
+        with:
+          target: ${{ matrix.target }}
+      # Linux 交叉目标(aarch64 / musl)需要对应的链接器与 C 工具链
+      - name: Setup cross toolchain
+        if: runner.os == 'Linux'
+        uses: taiki-e/setup-cross-toolchain-action@v1
         with:
           target: ${{ matrix.target }}
       - name: Resolve binary name
@@ -70,4 +83,6 @@ jobs:
           archive: $bin-$tag-$target
           include: README.md,LICENSE
           leading-dir: true
+          # 每个产物附带 sha256 校验和文件,供下载方验证完整性
+          checksum: sha256
           token: ${{ secrets.GITHUB_TOKEN }}
