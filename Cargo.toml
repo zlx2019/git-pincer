@@ -6,11 +6,10 @@ rust-version = "1.96.0"
 authors = ["Zero <1143967454@qq.com>"]
 description = "A simple and compact Git CLI, mainly used for resolving conflicts."
 documentation = "https://docs.rs/git-pincer"
-homepage = "https://github.com/zlx2019/git-peace"
-repository = "https://github.com/zlx2019/git-peace"
+repository = "https://github.com/zlx2019/git-pincer"
 readme = "README.md"
 license = "MIT"
-keywords = []
+keywords = ["git", "git-cli", "tui"]
 
 [dependencies]
 clap = { version = "4", features = ["derive"] }
@@ -28,18 +27,15 @@ syntect = { version = "5", default-features = false, features = ["default-syntax
 
 
 [lints.rust]
-unsafe_code = "warn"      # 使用 unsafe 代码时告警（确需时可局部 #[allow]）
-missing_docs = "warn"     # 公共项缺少文档注释时告警
+unsafe_code = "warn"
+missing_docs = "warn"
 
 [lints.clippy]
-unwrap_used = "warn"      # 使用 unwrap 时告警（测试/原型代码可局部 allow）
+unwrap_used = "warn"
 
-### Working directory
 [workspace]
 members = []
 
-### Production packaging configuration
 [profile.release]
 
-### Debug packaging configuration
 [profile.dev]

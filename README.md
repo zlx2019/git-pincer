@@ -1,97 +1,132 @@
 # git-pincer
 
-[![CI](https://github.com/zlx2019/git-peace/actions/workflows/ci.yml/badge.svg)](https://github.com/zlx2019/git-peace/actions/workflows/ci.yml)
+[![CI](https://github.com/zlx2019/git-pincer/actions/workflows/ci.yml/badge.svg)](https://github.com/zlx2019/git-pincer/actions/workflows/ci.yml)
 [![License: MIT](https://img.shields.io/badge/license-MIT-blue.svg)](./LICENSE)
 [![Rust](https://img.shields.io/badge/rust-1.96.0%2B-orange.svg)](https://www.rust-lang.org)
 
-> A simple and compact Git CLI, mainly used for resolving conflicts.
+**English** | [简体中文](./README.zh-CN.md)
 
-终端里的 Git 冲突解决工具:IDEA 风格的三栏合并 TUI(本地 | 结果 | 远端),可直接发起 `merge / rebase / pull / cherry-pick / revert` 并接管随后的全部冲突解决流程。
+> An IDEA-style three-pane Git conflict resolver that lives in your terminal.
+
+`git-pincer` takes the pain out of merge conflicts: launch `merge / rebase / pull / cherry-pick / revert` through it (or invoke it after any conflict happens), resolve every conflict chunk by chunk in a three-pane TUI, and let it drive `git add` + `--continue` loops until the repository is clean again — including multi-round rebase and cherry-pick sequences.
+
+<!-- TODO: replace with a real screenshot / GIF -->
+
+```text
+ ⚑ MERGE ▏█████░░░░░ 2/5 files ▏src/app.rs ▏✗ 2 conflicts
+╭ LOCAL · feature ────╮╭ RESULT ───────╮╭ REMOTE · main ─────╮
+│  8 » fn new() {     ││  8 ⋯ pending ⋯││  8 « fn make() {   │
+│    »   init()       ││               ││    «   setup()     │
+│  ✓ resolved chunks lose their band, the gutter keeps ✓    │
+│ ────── ⋯ 12 unchanged lines (press z to expand) ⋯ ──────  │
+╰─────────────────────╯╰───────────────╯╰────────────────────╯
+  h take local · l take remote · x ignore · e edit · ? help
+```
 
 ## Features
 
-- **三栏冲突解决 TUI**:块级色带按改动类型着色(IDEA 语义:蓝=修改、绿=新增、灰=删除、红=冲突),`h/l` 取用本地/远端(冲突两侧先后取用即「两者都要」),`x` 忽略、`u` 撤销、`e` 调 `$EDITOR` 手动编辑
-- **现代终端视觉**:圆角边框面板 + IDEA 式 gutter 操作符号(`»«✓✗`)+ delta 式词级差异高亮 + syntect 语法着色(Maple 主题,按扩展名,超大文件自动降级);深浅双主题,`--theme <auto|dark|light>` 指定(auto 经 `COLORFGBG` 自动检测)
-- **接管完整流程**:解决全部文件后自动 `git add` + `--continue`,rebase 多轮冲突自动循环,直到仓库回到干净状态;`stash pop` / `checkout -m` 等无 `--continue` 的冲突同样可接管
-- **交互式操作菜单**:仓库干净时裸 `git-pincer` 弹出菜单,pull 直接执行,merge / rebase 二级选择分支,cherry-pick / revert 二级选择提交,撞冲突无缝进入解决界面
-- **diff3 三方合并算法**:两次 2-way diff 分块归组,保守碰撞策略(宁多报冲突,不静默错合)
-- **原生 git CLI 交互**:shell out 执行(与 lazygit / IDEA 同路),认证、hooks、merge 策略、rerere 全部继承用户配置
-- **二进制冲突降级**:整文件二选一;免 git 的单文件模式可直接解析带 `<<<<<<<` 标记的文件
+- **Three-pane merge UI** — local | result | remote, with chunk bands colored by change type using IDEA semantics: blue = modified, green = added, gray = deleted, red = conflict. Bands fade as chunks get resolved.
+- **Precise diff rendering** — delta-style word-level emphasis inside changed chunks, plus syntax highlighting (Maple theme via syntect, selected by file extension, gracefully disabled for huge files).
+- **Full flow takeover** — after all files are resolved it runs `git add` and the matching `--continue`, re-probes, and loops until the repository is clean. Multi-commit cherry-picks and multi-round rebases just work.
+- **Interactive action menu** — running bare `git-pincer` in a clean repository opens a menu: pick an action, then a branch (merge / rebase) or a commit (cherry-pick / revert). Failures pop an in-TUI dialog and return to the menu instead of exiting.
+- **Broad conflict-source support** — merge, rebase, pull, cherry-pick, revert, `git am`, and even flows without a `--continue` such as `stash pop`, `checkout -m` or `apply --3way`.
+- **Native git, zero magic** — everything shells out to your git binary (the same route lazygit and IDEA take), so credentials, hooks, merge strategies and rerere all follow your existing configuration. Arguments are passed as arrays (no shell, no injection), and host `GIT_DIR`-style variables are scrubbed so nested invocations from hooks cannot hijack the wrong repository.
+- **Terminal-aware theming** — dark (Tokyo Night) and light (Maple Light) themes via `--theme <auto|dark|light>`, `COLORFGBG` auto-detection, and automatic xterm-256 quantization on terminals without truecolor support.
+- **Sensible fallbacks** — binary conflicts degrade to whole-file pick-one; a git-free `file` mode parses conflict markers directly; non-TTY invocations fail with a readable message instead of a panic.
 
-## 用法
+## Installation
 
-```bash
-git-pincer                      # 有冲突现场直接接管;仓库干净时弹出操作菜单(选操作 → 选分支/提交 → 执行)
-git-pincer merge <branch>       # 执行 git merge 并接管冲突解决
-git-pincer rebase <branch>      # 执行 git rebase,多轮冲突自动循环
-git-pincer pull origin main     # 参数透传给 git pull
-git-pincer cherry-pick <commit> # 执行 git cherry-pick(多提交多轮循环)
-git-pincer revert <commit>      # 执行 git revert 并接管冲突解决
-git-pincer file conflict.txt    # 免 git:解析带冲突标记的单个文件,解决后写回
-git-pincer abort                # 中止进行中的合并操作(merge / rebase / cherry-pick / revert / am)
-```
-
-TUI 内按 `?` 查看全部按键。试玩:`cp fixtures/conflict.txt /tmp/ && cargo run -- file /tmp/conflict.txt`
-
-## 快速开始
-
-### 1. 安装开发工具
-
-项目通过 `rust-toolchain.toml` 锁定 Rust 版本，进入目录后 rustup 会自动安装对应工具链。另需安装以下工具（与 CI 检查保持一致）：
+Requires `git` on your `PATH`. Building from source requires Rust 1.96+.
 
 ```bash
-cargo install --locked cargo-deny     # 依赖安全 / 许可证审计
-cargo install cargo-nextest --locked  # 测试运行器
-cargo install typos-cli               # 拼写检查
-cargo install git-cliff               # Changelog 生成
-pip install pre-commit                # Git 提交前检查
+# From the repository
+cargo install --git https://github.com/zlx2019/git-pincer
+
+# Or from a local clone
+cargo install --path .
 ```
 
-### 2. 启用 pre-commit 钩子
+Prebuilt binaries for major platforms are attached to [GitHub Releases](https://github.com/zlx2019/git-pincer/releases) on tagged versions. A crates.io release is planned.
+
+## Usage
 
 ```bash
-pre-commit install
+git-pincer                      # conflicts present: take over and resolve them
+                                # clean repo: open the interactive action menu
+git-pincer merge <branch>       # run git merge, resolve conflicts if any
+git-pincer rebase <branch>      # run git rebase, looping through every conflicted commit
+git-pincer pull origin main     # arguments are passed straight to git pull
+git-pincer cherry-pick <commit> # multiple commits / options are passed through
+git-pincer revert <commit>      # run git revert and take over the conflicts
+git-pincer file conflict.txt    # git-free: parse a conflict-marked file, write it back
+git-pincer abort                # abort the operation in progress (with confirmation)
 ```
 
-启用后每次 `git commit` 会自动运行格式化、Lint、测试等检查，全部通过才会提交成功。
+Global options:
 
-### 3. 构建与运行
+| Option | Description |
+| ------ | ----------- |
+| `-C, --repo <PATH>` | Operate on the repository at `PATH` (defaults to the current directory) |
+| `--theme <auto\|dark\|light>` | UI theme; `auto` inspects `COLORFGBG` and falls back to dark |
+| `-v, --verbose` | Echo every git command being executed |
+
+Try the TUI without a git repository:
 
 ```bash
-cargo run -- --help                 # 查看全部子命令与参数
-cargo install --path .              # 安装为全局命令 git-pincer
+cp fixtures/conflict.txt /tmp/ && git-pincer file /tmp/conflict.txt
 ```
 
-## 开发
+### Keybindings
 
-常用命令：
+| Key | Action |
+| --- | ------ |
+| `h` / `←` | Take the local side (taking both sides of a conflict in order keeps both) |
+| `l` / `→` | Take the remote side |
+| `x` | Ignore the remaining pending sides of the current chunk (keep base) |
+| `u` | Undo all decisions on the current chunk |
+| `e` | Edit the current chunk in `$EDITOR` |
+| `a` | Apply every non-conflicting change at once |
+| `j` / `k` | Move to the next / previous change chunk |
+| `n` / `p` | Jump to the next / previous unresolved conflict |
+| `y` / `Y` | Copy the current chunk result / the whole file result |
+| `H` / `L` | Copy the local / remote side of the current chunk |
+| `w` | Write the file (auto-applies remaining non-conflict changes, then `git add`) |
+| `Tab` | Switch to the next file |
+| `z` | Fold / unfold unchanged regions |
+| `q` | Quit (press twice if files are unfinished; the scene is kept) |
+| `?` | Show the full key reference |
+
+### Supported conflict sources
+
+| Source | Detected via | Finished with |
+| ------ | ------------ | ------------- |
+| `git merge` / `git pull` | `MERGE_HEAD` | `git merge --continue` |
+| `git rebase` | `rebase-merge` / `rebase-apply` | `git rebase --continue` (multi-round) |
+| `git cherry-pick` | `CHERRY_PICK_HEAD` | `git cherry-pick --continue` (multi-round) |
+| `git revert` | `REVERT_HEAD` | `git revert --continue` |
+| `git am -3` | `rebase-apply/applying` | `git am --continue` |
+| `stash pop` / `checkout -m` / `apply --3way` | unmerged index entries only | nothing to continue — resolving is enough |
+
+## How it works
+
+- **diff3 core** — two 2-way diffs (base→ours, base→theirs, Myers algorithm with a 500 ms timeout guard) are grouped by base-range collisions into chunks: stable, one-sided, agreed, or conflicting. The grouping is deliberately conservative: reporting one conflict too many beats merging something silently wrong.
+- **Pure-logic session** — every chunk side is pending / applied / ignored; take order defines how content is stitched together, and `$EDITOR` edits override a chunk wholesale. Files containing NUL bytes degrade to a whole-file binary choice.
+- **Thin git wrapper** — conflict contents are read from index stages 1/2/3; writes go through `git add`; repository state (merge / rebase / cherry-pick / revert / am) is probed from the git directory so the right `--continue` is always used.
+
+## Development
 
 ```bash
-cargo nextest run    # 运行测试
-cargo clippy         # 静态检查
-cargo fmt            # 格式化
+cargo nextest run --all-features --no-tests pass   # tests
+cargo clippy --all-targets --all-features -- -D warnings
+cargo fmt --all -- --check
 ```
 
-提交规范与完整开发流程见 [CONTRIBUTING.md](./CONTRIBUTING.md)。
+See [CONTRIBUTING.md](./CONTRIBUTING.md) for the toolchain setup, pre-commit hooks and commit conventions.
 
-## 项目结构
+## Acknowledgements
 
-```text
-src/
-├── main.rs           程序入口:解析参数并分发
-├── lib.rs            模块导出(bin+lib 拆分,供集成测试使用)
-├── cli.rs            命令行接口定义(clap)与子命令注册
-├── commands/         子命令编排(merge/rebase/pull/resolve/file/abort)
-├── merge.rs          diff3 三方合并核心与冲突标记解析(纯逻辑)
-├── git.rs            原生 git CLI 薄封装(shell out)
-├── app.rs            冲突解决会话状态机(纯逻辑)
-└── ui/               ratatui 渲染层:mod 事件循环 / theme 配色 / rows 行构建
-                      / highlight 词级+语法高亮缓存 / panes 三栏面板 / chrome 状态栏等
-tests/git_flow.rs     集成测试:临时真实 git 仓库验证全流程
-```
-
-新增子命令:在 `src/commands/` 下新建模块,并在 `src/cli.rs` 的 `Commands` 枚举中注册对应变体。
+Built with [ratatui](https://github.com/ratatui/ratatui), [similar](https://github.com/mitsuhiko/similar), [syntect](https://github.com/trishume/syntect) and [clap](https://github.com/clap-rs/clap). Visual design inspired by the IntelliJ IDEA merge tool, [delta](https://github.com/dandavison/delta) and [lazygit](https://github.com/jesseduffield/lazygit).
 
 ## License
 
-本项目采用 [MIT](./LICENSE) 许可证。
+Distributed under the [MIT](./LICENSE) license.
