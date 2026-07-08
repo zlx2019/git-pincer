@@ -322,7 +322,7 @@ fn draw_pick(
 pub(crate) fn notice(title: &str, body: &str, light: bool) -> Result<()> {
     if !std::io::stdout().is_terminal() {
         // 非 TTY 场景直接打印,不进入弹框
-        eprintln!("[git-peace] {title}: {body}");
+        eprintln!("[git-pincer] {title}: {body}");
         return Ok(());
     }
     let theme = Theme::select(light);

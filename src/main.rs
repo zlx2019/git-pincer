@@ -1,8 +1,8 @@
-//! The git-peace executable entry: Parses arguments and dispatches them to subcommands.
+//! The git-pincer executable entry: Parses arguments and dispatches them to subcommands.
 
 use anyhow::Result;
 use clap::Parser;
-use git_peace::cli::Cli;
+use git_pincer::cli::Cli;
 
 fn main() -> Result<()> {
     Cli::parse().run()

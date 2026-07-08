@@ -1,4 +1,4 @@
-//! 用户服务配置模块(git-peace 练手示例)。
+//! 用户服务配置模块(git-pincer 练手示例)。
 //!
 //! 本文件包含 7 处典型冲突,直接体验:
 //!   cargo run -- file fixtures/conflict_rich.txt

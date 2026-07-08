@@ -1,4 +1,4 @@
-# git-peace
+# git-pincer
 
 [![CI](https://github.com/zlx2019/git-peace/actions/workflows/ci.yml/badge.svg)](https://github.com/zlx2019/git-peace/actions/workflows/ci.yml)
 [![License: MIT](https://img.shields.io/badge/license-MIT-blue.svg)](./LICENSE)
@@ -13,7 +13,7 @@
 - **三栏冲突解决 TUI**:块级色带按改动类型着色(IDEA 语义:蓝=修改、绿=新增、灰=删除、红=冲突),`h/l` 取用本地/远端(冲突两侧先后取用即「两者都要」),`x` 忽略、`u` 撤销、`e` 调 `$EDITOR` 手动编辑
 - **现代终端视觉**:圆角边框面板 + IDEA 式 gutter 操作符号(`»«✓✗`)+ delta 式词级差异高亮 + syntect 语法着色(Maple 主题,按扩展名,超大文件自动降级);深浅双主题,`--theme <auto|dark|light>` 指定(auto 经 `COLORFGBG` 自动检测)
 - **接管完整流程**:解决全部文件后自动 `git add` + `--continue`,rebase 多轮冲突自动循环,直到仓库回到干净状态;`stash pop` / `checkout -m` 等无 `--continue` 的冲突同样可接管
-- **交互式操作菜单**:仓库干净时裸 `git-peace` 弹出菜单,pull 直接执行,merge / rebase 二级选择分支,cherry-pick / revert 二级选择提交,撞冲突无缝进入解决界面
+- **交互式操作菜单**:仓库干净时裸 `git-pincer` 弹出菜单,pull 直接执行,merge / rebase 二级选择分支,cherry-pick / revert 二级选择提交,撞冲突无缝进入解决界面
 - **diff3 三方合并算法**:两次 2-way diff 分块归组,保守碰撞策略(宁多报冲突,不静默错合)
 - **原生 git CLI 交互**:shell out 执行(与 lazygit / IDEA 同路),认证、hooks、merge 策略、rerere 全部继承用户配置
 - **二进制冲突降级**:整文件二选一;免 git 的单文件模式可直接解析带 `<<<<<<<` 标记的文件
@@ -21,14 +21,14 @@
 ## 用法
 
 ```bash
-git-peace                      # 有冲突现场直接接管;仓库干净时弹出操作菜单(选操作 → 选分支/提交 → 执行)
-git-peace merge <branch>       # 执行 git merge 并接管冲突解决
-git-peace rebase <branch>      # 执行 git rebase,多轮冲突自动循环
-git-peace pull origin main     # 参数透传给 git pull
-git-peace cherry-pick <commit> # 执行 git cherry-pick(多提交多轮循环)
-git-peace revert <commit>      # 执行 git revert 并接管冲突解决
-git-peace file conflict.txt    # 免 git:解析带冲突标记的单个文件,解决后写回
-git-peace abort                # 中止进行中的合并操作(merge / rebase / cherry-pick / revert / am)
+git-pincer                      # 有冲突现场直接接管;仓库干净时弹出操作菜单(选操作 → 选分支/提交 → 执行)
+git-pincer merge <branch>       # 执行 git merge 并接管冲突解决
+git-pincer rebase <branch>      # 执行 git rebase,多轮冲突自动循环
+git-pincer pull origin main     # 参数透传给 git pull
+git-pincer cherry-pick <commit> # 执行 git cherry-pick(多提交多轮循环)
+git-pincer revert <commit>      # 执行 git revert 并接管冲突解决
+git-pincer file conflict.txt    # 免 git:解析带冲突标记的单个文件,解决后写回
+git-pincer abort                # 中止进行中的合并操作(merge / rebase / cherry-pick / revert / am)
 ```
 
 TUI 内按 `?` 查看全部按键。试玩:`cp fixtures/conflict.txt /tmp/ && cargo run -- file /tmp/conflict.txt`
@@ -59,7 +59,7 @@ pre-commit install
 
 ```bash
 cargo run -- --help                 # 查看全部子命令与参数
-cargo install --path .              # 安装为全局命令 git-peace
+cargo install --path .              # 安装为全局命令 git-pincer
 ```
 
 ## 开发

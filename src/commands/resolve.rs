@@ -15,11 +15,11 @@ pub fn resolve_loop(git: &Git, light: bool) -> Result<()> {
         if files.is_empty() {
             let state = git.state()?;
             if state == RepoState::Clean {
-                println!("[git-peace] ✔ 全部完成,仓库已回到干净状态");
+                println!("[git-pincer] ✔ 全部完成,仓库已回到干净状态");
                 return Ok(());
             }
             // 透传执行,git 与钩子的输出实时流向终端
-            println!("[git-peace] $ git {} --continue", state.op_name());
+            println!("[git-pincer] $ git {} --continue", state.op_name());
             let status = git.continue_op(state)?;
             if status.success() {
                 continue;
@@ -29,15 +29,15 @@ pub fn resolve_loop(git: &Git, light: bool) -> Result<()> {
                 bail!(
                     "git {} --continue 失败(git 输出见上方)。\n\
                      提示:若是 pre-commit 钩子拒绝提交(fmt / clippy 等),\
-                     修复问题并 git add 后重新运行 git-peace 即可继续,已解决的冲突不会丢失",
+                     修复问题并 git add 后重新运行 git-pincer 即可继续,已解决的冲突不会丢失",
                     state.op_name()
                 );
             }
-            println!("[git-peace] 进入下一轮,仍有冲突待解决");
+            println!("[git-pincer] 进入下一轮,仍有冲突待解决");
             continue;
         }
 
-        println!("[git-peace] {} 个文件存在冲突,进入解决界面…", files.len());
+        println!("[git-pincer] {} 个文件存在冲突,进入解决界面…", files.len());
         let mut session = build_session(git, &files)?;
         let outcome = ui::run_session(
             &mut session,
@@ -48,7 +48,9 @@ pub fn resolve_loop(git: &Git, light: bool) -> Result<()> {
             light,
         )?;
         if outcome == Outcome::Quit {
-            println!("[git-peace] 已退出,现场保留;随时运行 git-peace 继续,或 git-peace abort 中止");
+            println!(
+                "[git-pincer] 已退出,现场保留;随时运行 git-pincer 继续,或 git-pincer abort 中止"
+            );
             return Ok(());
         }
     }

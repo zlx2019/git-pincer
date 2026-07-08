@@ -309,7 +309,7 @@ fn edit_lines(terminal: &mut DefaultTerminal, initial: &[String]) -> Result<Opti
     let program = parts.next().unwrap_or("vi").to_owned();
     let args: Vec<&str> = parts.collect();
 
-    let path = std::env::temp_dir().join(format!("git-peace-edit-{}.txt", std::process::id()));
+    let path = std::env::temp_dir().join(format!("git-pincer-edit-{}.txt", std::process::id()));
     std::fs::write(&path, initial.join("\n"))?;
 
     // 让出终端给编辑器,结束后重建 TUI
