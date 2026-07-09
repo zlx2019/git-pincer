@@ -1,6 +1,8 @@
 name: Release
-
-# 推送 v* 标签时，生成 Changelog、创建 GitHub Release 并附加多平台构建产物
+# 推送标签时：
+#   - 生成 changelog
+#   - 创建 github Release（并附加多平台构建产物）
+#   - 发布 crate.io
 on:
   push:
     tags:
@@ -17,13 +19,10 @@ jobs:
       - uses: actions/checkout@v4
         with:
           fetch-depth: 0
-
       - name: Generate changelog
         uses: orhun/git-cliff-action@v4
         with:
           config: cliff.toml
-          # 正式版:--latest 取最近的正式版本节点(预发布不算节点,区间自动覆盖 rc 期间的提交);
-          # 预发布:标签不被 tag_pattern 识别,改用 --unreleased 并显式指定版本名
           args: ${{ contains(github.ref_name, '-') && format('--unreleased --tag {0}', github.ref_name) || '--latest' }} --strip header
         env:
           OUTPUT: CHANGES.md
@@ -48,7 +47,6 @@ jobs:
         include:
           - target: x86_64-unknown-linux-gnu
             os: ubuntu-latest
-          # musl 静态链接:不依赖 glibc 版本,任何 Linux 发行版可用
           - target: x86_64-unknown-linux-musl
             os: ubuntu-latest
           - target: aarch64-unknown-linux-gnu
@@ -64,7 +62,7 @@ jobs:
       - uses: actions-rust-lang/setup-rust-toolchain@v1
         with:
           target: ${{ matrix.target }}
-      # Linux 交叉目标(aarch64 / musl)需要对应的链接器与 C 工具链
+      # Linux cross target (aarch64 / musl) requires the corresponding linker and C toolchain.
       - name: Setup cross toolchain
         if: runner.os == 'Linux'
         uses: taiki-e/setup-cross-toolchain-action@v1
@@ -86,3 +84,24 @@ jobs:
           # 每个产物附带 sha256 校验和文件,供下载方验证完整性
           checksum: sha256
           token: ${{ secrets.GITHUB_TOKEN }}
+
+  publish:
+    name: Publish to crates.io
+    if: ${{ !contains(github.ref_name, '-') }}
+    needs: build
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions-rust-lang/setup-rust-toolchain@v1
+      # tag 与 Cargo.toml 版本不一致时中止,防止发出与 tag 不符的版本
+      - name: Verify tag matches package version
+        run: |
+          pkg=$(cargo metadata --no-deps --format-version 1 | jq -r '.packages[0].version')
+          if [ "v$pkg" != "${{ github.ref_name }}" ]; then
+            echo "::error::tag ${{ github.ref_name }} 与 Cargo.toml 版本 $pkg 不一致"
+            exit 1
+          fi
+      - name: Publish
+        run: cargo publish --locked
+        env:
+          CARGO_REGISTRY_TOKEN: ${{ secrets.CARGO_REGISTRY_TOKEN }}
