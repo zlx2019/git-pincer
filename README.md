@@ -14,32 +14,33 @@
 
 The name comes from Rust's mascot — the crab. A Git conflict is like two branches "pinching" the same piece of code at the same time, while a crab's pincer stands for stability, precision and control. May it work like a trusty pincer: gripping both sides of every conflict firmly, helping you understand the differences and complete the merge more efficiently.
 
-![git-pincer three-pane merge UI](./assets/demo.png)
+![git-pincer three-pane merge UI](./assets/showcase.png)
 
 ## Features
 
 - **Three-pane merge UI** — local | result | remote, with chunk bands colored by change type using IDEA semantics: blue = modified, green = added, gray = deleted, red = conflict. Bands fade as chunks get resolved.
 - **Precise diff rendering** — delta-style word-level emphasis inside changed chunks, plus syntax highlighting (Maple theme via syntect, selected by file extension, gracefully disabled for huge files).
 - **Full flow takeover** — after all files are resolved it runs `git add` and the matching `--continue`, re-probes, and loops until the repository is clean. Multi-commit cherry-picks and multi-round rebases just work.
-- **Interactive action menu** — running bare `git-pincer` in a clean repository opens a menu: pick an action, then a branch (merge / rebase) or a commit (cherry-pick / revert). Failures pop an in-TUI dialog and return to the menu instead of exiting.
+- **RPG-style action menu** — running bare `git-pincer` in a clean repository opens a pixel-art menu with a status window that maps your repository to character vitals (Lv. = commit count, HP = uncommitted changes, MP = stashes, EXP = commits ahead). Pick an action, then a branch (merge / rebase) or a commit (cherry-pick / revert); success and failure both pop an in-TUI dialog and return to the menu — no flicker, no exit.
 - **Broad conflict-source support** — merge, rebase, pull, cherry-pick, revert, `git am`, and even flows without a `--continue` such as `stash pop`, `checkout -m` or `apply --3way`.
 - **Native git, zero magic** — everything shells out to your git binary (the same route lazygit and IDEA take), so credentials, hooks, merge strategies and rerere all follow your existing configuration. Arguments are passed as arrays (no shell, no injection), and host `GIT_DIR`-style variables are scrubbed so nested invocations from hooks cannot hijack the wrong repository.
 - **Terminal-aware theming** — dark (Tokyo Night) and light (Maple Light) themes via `--theme <auto|dark|light>`, `COLORFGBG` auto-detection, and automatic xterm-256 quantization on terminals without truecolor support.
+- **Bilingual UI** — every menu, hint and message ships in both English and Chinese; `--lang <auto|zh|en>` with `auto` following the system locale. Messages live in `locales/*.conf` and are embedded at compile time — still a single binary.
 - **Sensible fallbacks** — binary conflicts degrade to whole-file pick-one; a git-free `file` mode parses conflict markers directly; non-TTY invocations fail with a readable message instead of a panic.
 
 ## Installation
 
-Requires `git` on your `PATH`. Building from source requires Rust 1.96+.
+Requires `git` on your `PATH`.
 
 ```bash
-# From the repository
-cargo install --git https://github.com/zlx2019/git-pincer
-
-# Or from a local clone
-cargo install --path .
+cargo install git-pincer
 ```
 
-Prebuilt binaries for major platforms are attached to [GitHub Releases](https://github.com/zlx2019/git-pincer/releases) on tagged versions. A crates.io release is planned.
+Prebuilt binaries for major platforms are also attached to [GitHub Releases](https://github.com/zlx2019/git-pincer/releases). To build from source (Rust 1.96+):
+
+```bash
+cargo install --git https://github.com/zlx2019/git-pincer
+```
 
 ## Usage
 
@@ -61,6 +62,7 @@ Global options:
 | ------ | ----------- |
 | `-C, --repo <PATH>` | Operate on the repository at `PATH` (defaults to the current directory) |
 | `--theme <auto\|dark\|light>` | UI theme; `auto` inspects `COLORFGBG` and falls back to dark |
+| `--lang <auto\|zh\|en>` | UI language; `auto` follows the system locale (Chinese locales get Chinese, everything else English) |
 | `-v, --verbose` | Echo every git command being executed |
 
 Try the TUI without a git repository:

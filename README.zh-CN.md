@@ -14,32 +14,33 @@
 
 项目名称来源于 Rust 的吉祥物——螃蟹。Git 冲突就像两个分支同时「夹住」了同一段代码，而蟹钳象征着稳定、精准与掌控。希望它能够像一只可靠的蟹钳，帮助开发者牢牢抓住冲突双方，更高效地理解差异、完成合并。
 
-![git-pincer 三栏合并界面](./assets/demo.png)
+![git-pincer 三栏合并界面](./assets/showcase.png)
 
 ## 特性
 
 - **三栏合并界面** — 本地 | 结果 | 远端,块级色带按改动类型着色,沿用 IDEA 语义:蓝 = 修改、绿 = 新增、灰 = 删除、红 = 冲突;块解决后色带随之消失。
 - **精细的差异呈现** — 改动块内 delta 式词级高亮,配合语法着色(syntect 的 Maple 主题,按扩展名匹配,超大文件自动降级)。
 - **接管完整流程** — 全部文件解决后自动执行 `git add` 与对应的 `--continue`,重新探测并循环,直到仓库干净;多提交摘取、多轮变基开箱即用。
-- **交互式操作菜单** — 在干净仓库中裸运行 `git-pincer` 会弹出菜单:先选操作,再选分支(merge / rebase)或提交(cherry-pick / revert);执行失败会弹框展示原因并回到菜单,而非退出程序。
+- **RPG 像素风操作菜单** — 在干净仓库中裸运行 `git-pincer` 弹出像素风菜单,状态窗把仓库映射成角色面板(Lv. = 提交数、HP = 未提交改动、MP = 贮藏、EXP = 待推送);选操作,再选分支(merge / rebase)或提交(cherry-pick / revert),成功与失败都在 TUI 内弹框反馈并回到菜单——不闪屏、不退出。
 - **广泛的冲突来源支持** — merge、rebase、pull、cherry-pick、revert、`git am`,以及 `stash pop`、`checkout -m`、`apply --3way` 这类没有 `--continue` 的场景。
 - **原生 git,无黑魔法** — 全部 shell out 调用你的 git 二进制(与 lazygit / IDEA 同路),认证、hooks、合并策略、rerere 完全继承现有配置;参数以数组传递不经过 shell(构造上杜绝注入),并清除宿主 `GIT_DIR` 类环境变量,防止从钩子中被调起时嵌套 git 劫持到错误仓库。
 - **终端自适应主题** — 深色(Tokyo Night)/ 浅色(Maple Light)双主题,`--theme <auto|dark|light>` 指定,`auto` 经 `COLORFGBG` 检测;不支持真彩的终端自动量化为 xterm-256 色。
+- **中英双语界面** — 菜单、提示与输出全部提供中英文,`--lang <auto|zh|en>` 指定,`auto` 跟随系统 locale;文案维护在 `locales/*.conf`,编译期嵌入——依然是单个二进制。
 - **周全的兜底** — 二进制冲突降级为整文件二选一;免 git 的 `file` 模式直接解析冲突标记;非 TTY 环境给出可读报错而非 panic。
 
 ## 安装
 
-需要 `PATH` 中有 `git`;源码构建需要 Rust 1.96+。
+需要 `PATH` 中有 `git`。
 
 ```bash
-# 从仓库安装
-cargo install --git https://github.com/zlx2019/git-pincer
-
-# 或从本地克隆安装
-cargo install --path .
+cargo install git-pincer
 ```
 
-主流平台的预编译二进制会随打 tag 的版本附在 [GitHub Releases](https://github.com/zlx2019/git-pincer/releases);crates.io 发布在计划中。
+主流平台的预编译二进制也会附在 [GitHub Releases](https://github.com/zlx2019/git-pincer/releases);源码构建(Rust 1.96+):
+
+```bash
+cargo install --git https://github.com/zlx2019/git-pincer
+```
 
 ## 用法
 
@@ -61,6 +62,7 @@ git-pincer abort                # 中止进行中的合并操作(有确认)
 | ---- | ---- |
 | `-C, --repo <PATH>` | 操作指定路径的仓库(默认当前目录) |
 | `--theme <auto\|dark\|light>` | 界面主题;`auto` 读取 `COLORFGBG`,检测不到用深色 |
+| `--lang <auto\|zh\|en>` | 界面语言;`auto` 跟随系统 locale(中文环境用中文,其余英文) |
 | `-v, --verbose` | 回显执行的每条 git 命令 |
 
 不需要 git 仓库也能试玩 TUI:
