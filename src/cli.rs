@@ -15,10 +15,10 @@ use crate::commands;
     long_about = None
 )]
 pub struct Cli {
-    /// 子命令, 缺省时处理已有的冲突
+    /// The specific subcommand to be executed
     #[command(subcommand)]
     pub command: Option<Commands>,
-    /// 要处理的 Git 仓库路径(默认为当前工作目录)
+    /// The Git repository path (default is current directory)
     #[arg(short = 'C', long = "repo", global = true, value_name = "PATH")]
     pub repo: Option<PathBuf>,
     /// Echo executed git command
@@ -27,6 +27,20 @@ pub struct Cli {
     /// theme
     #[arg(long, global = true, value_enum, default_value = "auto")]
     pub theme: ThemeArg,
+    /// UI language
+    #[arg(long, global = true, value_enum, default_value = "auto")]
+    pub lang: LangArg,
+}
+
+/// 界面语言选择。
+#[derive(Debug, Clone, Copy, PartialEq, Eq, clap::ValueEnum)]
+pub enum LangArg {
+    /// 按系统 locale 自动选择(zh 前缀用中文,其余英文)
+    Auto,
+    /// 中文
+    Zh,
+    /// 英文
+    En,
 }
 
 /// 界面主题选择。
@@ -62,6 +76,11 @@ pub enum Commands {
 impl Cli {
     /// Distribute and execute the selected subcommands.
     pub fn run(self) -> Result<()> {
+        crate::i18n::init(match self.lang {
+            LangArg::Zh => crate::i18n::Lang::Zh,
+            LangArg::En => crate::i18n::Lang::En,
+            LangArg::Auto => crate::i18n::detect(),
+        });
         let verbose = self.verbose;
         let dir = self.repo.unwrap_or_else(|| PathBuf::from("."));
         let light = match self.theme {

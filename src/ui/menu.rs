@@ -19,6 +19,7 @@ use ratatui::widgets::{
 use std::sync::OnceLock;
 
 use crate::git::RepoVitals;
+use crate::i18n::{tr, tr_f};
 
 use super::theme::{Theme, term_color};
 
@@ -174,7 +175,7 @@ impl MenuSession {
     /// 打开菜单会话(进入 TUI);非交互终端直接报错。
     pub(crate) fn open(light: bool) -> Result<Self> {
         if !std::io::stdout().is_terminal() {
-            anyhow::bail!("打开选择菜单需要交互式终端(当前 stdout 不是 TTY)");
+            anyhow::bail!("{}", tr("common.need_tty_menu"));
         }
         Ok(Self {
             terminal: ratatui::init(),
@@ -300,7 +301,7 @@ fn draw_pick(
 
     let block = rpg_block(title, theme).title_bottom(
         Line::from(Span::styled(
-            " J/K 移动 · Enter 确认 · Q 返回 ",
+            format!(" {} ", tr("menu.list_keys")),
             Style::new().fg(theme.fg_dim),
         ))
         .centered(),
@@ -394,7 +395,11 @@ fn draw_rpg_menu(
         y += logo_area.height + breathe;
         frame.render_widget(Paragraph::new(art), logo_area);
         frame.render_widget(
-            Paragraph::new(divider_line("◆ 选择你的指令 ◆", width, theme)),
+            Paragraph::new(divider_line(
+                &format!("◆ {} ◆", tr("menu.divider")),
+                width,
+                theme,
+            )),
             Rect {
                 x,
                 y,
@@ -416,7 +421,8 @@ fn draw_rpg_menu(
         frame.render_widget(Clear, panel);
         let inner = width.saturating_sub(6) as usize;
         frame.render_widget(
-            Paragraph::new(status_rows(vitals, inner, theme)).block(rpg_block("状 态", theme)),
+            Paragraph::new(status_rows(vitals, inner, theme))
+                .block(rpg_block(tr("menu.status_title"), theme)),
             panel,
         );
     }
@@ -448,7 +454,10 @@ fn draw_rpg_menu(
                 ])
             })
             .collect();
-        frame.render_widget(Paragraph::new(rows).block(rpg_block("指 令", theme)), panel);
+        frame.render_widget(
+            Paragraph::new(rows).block(rpg_block(tr("menu.command_title"), theme)),
+            panel,
+        );
     }
 
     if show_hint {
@@ -483,11 +492,20 @@ fn draw_rpg_menu(
 
     let keys = Line::from(vec![
         keycap(" J/K ", theme),
-        Span::styled(" 移动   ", Style::new().fg(theme.fg_dim)),
+        Span::styled(
+            format!(" {}   ", tr("menu.key_move")),
+            Style::new().fg(theme.fg_dim),
+        ),
         keycap(" Enter ", theme),
-        Span::styled(" 确认   ", Style::new().fg(theme.fg_dim)),
+        Span::styled(
+            format!(" {}   ", tr("menu.key_confirm")),
+            Style::new().fg(theme.fg_dim),
+        ),
         keycap(" Q ", theme),
-        Span::styled(" 逃跑", Style::new().fg(theme.fg_dim)),
+        Span::styled(
+            format!(" {}", tr("menu.key_flee")),
+            Style::new().fg(theme.fg_dim),
+        ),
     ])
     .centered();
     frame.render_widget(
@@ -508,14 +526,18 @@ fn status_rows(vitals: &RepoVitals, inner: usize, theme: &Theme) -> Vec<Line<'st
     let mp = GAUGE_CELLS - vitals.stashes.min(GAUGE_CELLS);
     let exp = vitals.ahead.unwrap_or(0).min(GAUGE_CELLS);
     let exp_note = match vitals.ahead {
-        None => "无上游".to_owned(),
-        Some(0) => "已同步".to_owned(),
-        Some(n) => format!("↑{n} 待推送"),
+        None => tr("menu.no_upstream").to_owned(),
+        Some(0) => tr("menu.synced").to_owned(),
+        Some(n) => tr_f("menu.ahead", &[("n", &n.to_string())]),
     };
+    // 标签列对齐:分支标签可能比 HP/MP/EXP 宽(如英文 Branch)
+    let branch_label = tr("menu.branch");
+    let label_w = display_width(branch_label).max(3) + 1;
+    let pad = |label: &str| format!("{label}{}", " ".repeat(label_w - display_width(label)));
     vec![
         spread_line(
             vec![
-                Span::styled("分支 ", dim),
+                Span::styled(pad(branch_label), dim),
                 Span::styled(
                     vitals.branch.clone(),
                     Style::new()
@@ -530,17 +552,23 @@ fn status_rows(vitals: &RepoVitals, inner: usize, theme: &Theme) -> Vec<Line<'st
             inner,
         ),
         spread_line(
-            gauge_spans("HP  ", hp, theme.rpg_hp, theme),
-            vec![Span::styled(format!("改动 ×{}", vitals.changes), dim)],
+            gauge_spans(&pad("HP"), hp, theme.rpg_hp, theme),
+            vec![Span::styled(
+                tr_f("menu.changes", &[("n", &vitals.changes.to_string())]),
+                dim,
+            )],
             inner,
         ),
         spread_line(
-            gauge_spans("MP  ", mp, theme.rpg_mp, theme),
-            vec![Span::styled(format!("贮藏 ×{}", vitals.stashes), dim)],
+            gauge_spans(&pad("MP"), mp, theme.rpg_mp, theme),
+            vec![Span::styled(
+                tr_f("menu.stashes", &[("n", &vitals.stashes.to_string())]),
+                dim,
+            )],
             inner,
         ),
         spread_line(
-            gauge_spans("EXP ", exp, theme.rpg_exp, theme),
+            gauge_spans(&pad("EXP"), exp, theme.rpg_exp, theme),
             vec![Span::styled(exp_note, dim)],
             inner,
         ),
@@ -712,10 +740,10 @@ fn draw_flash(frame: &mut Frame, cmd_line: &str, theme: &Theme) {
     if area.width == 0 || area.height == 0 {
         return;
     }
-    let suffix = "  执行中…";
+    let suffix = format!("  {}", tr("menu.running"));
     // 边框 2 + 左右内边距 4 + 两端余量 2
     let width = panel_width(
-        display_width(cmd_line) + display_width(suffix) + 8,
+        display_width(cmd_line) + display_width(&suffix) + 8,
         true,
         area,
     );
@@ -781,7 +809,7 @@ fn draw_notice(frame: &mut Frame, title: &str, body: &str, theme: &Theme) {
         ))
         .title_bottom(
             Line::from(Span::styled(
-                " 按任意键关闭 ",
+                format!(" {} ", tr("common.close_any_key")),
                 Style::new().fg(theme.fg_dim),
             ))
             .centered(),
@@ -899,14 +927,14 @@ mod tests {
         println!("{text}");
         // CJK 在缓冲中占两格(续格为空格),匹配前去掉全部空格
         let flat = text.replace(' ', "");
-        assert!(flat.contains("◆状态"), "状态窗标题缺失");
-        assert!(flat.contains("◆指令"), "指令窗标题缺失");
+        assert!(flat.contains("◆STATUS"), "状态窗标题缺失");
+        assert!(flat.contains("◆COMMAND"), "指令窗标题缺失");
         assert!(flat.contains("▶pull"), "选中行光标缺失");
         assert!(flat.contains("Lv.128"), "等级缺失");
-        assert!(flat.contains("↑2待推送"), "待推送计数缺失");
-        assert!(flat.contains("选择你的指令"), "分隔线文案缺失");
+        assert!(flat.contains("↑2topush"), "待推送计数缺失");
+        assert!(flat.contains("ChooseYourCommand"), "分隔线文案缺失");
         assert!(flat.contains("从远端拉取最新提交"), "说明窗文案缺失");
-        assert!(flat.contains("逃跑"), "按键提示缺失");
+        assert!(flat.contains("Flee"), "按键提示缺失");
     }
 
     /// 高度不足时按序降级:12 行终端只保留指令窗与按键行
@@ -926,8 +954,8 @@ mod tests {
             .draw(|f| draw_rpg_menu(f, &items, 0, &vitals, &Theme::default()))
             .unwrap();
         let flat = buffer_text(terminal.backend().buffer()).replace(' ', "");
-        assert!(!flat.contains("◆状态"), "矮终端应隐藏状态窗");
-        assert!(flat.contains("◆指令"), "指令窗必须保留");
+        assert!(!flat.contains("◆STATUS"), "矮终端应隐藏状态窗");
+        assert!(flat.contains("◆COMMAND"), "指令窗必须保留");
         assert!(flat.contains("▶pull"));
     }
 

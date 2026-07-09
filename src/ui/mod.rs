@@ -22,6 +22,7 @@ mod panes;
 mod rows;
 mod theme;
 
+use crate::i18n::{tr, tr_f};
 use std::io::IsTerminal;
 
 use anyhow::{Context, Result};
@@ -72,7 +73,7 @@ pub fn run_session(
     // ratatui::init 在无 TTY 时会直接 panic,这里先行拦截给出可读错误
     // (如在管道 / CI 中误运行时)
     if !std::io::stdout().is_terminal() {
-        anyhow::bail!("打开冲突解决界面需要交互式终端(当前 stdout 不是 TTY)");
+        anyhow::bail!("{}", tr("common.need_tty_resolve"));
     }
     let mut terminal = ratatui::init();
     let result = event_loop(&mut terminal, session, write_file, light);
@@ -117,7 +118,7 @@ fn event_loop(
                     return Ok(Outcome::Quit);
                 }
                 ui.pending_quit = true;
-                ui.message = "仍有文件未完成;再按一次 q 退出(未写盘的进度将丢弃)".to_owned();
+                ui.message = tr("ui.quit_confirm").to_owned();
             }
             KeyCode::Char('?') => ui.show_help = true,
             KeyCode::Tab => session.next_file(),
@@ -137,9 +138,9 @@ fn event_loop(
                     if let Some(lines) = edit_lines(terminal, &initial)? {
                         merge.set_override(lines);
                         ui.revision += 1;
-                        ui.message = "已用编辑结果覆写当前块".to_owned();
+                        ui.message = tr("ui.edited").to_owned();
                     } else {
-                        ui.message = "编辑已取消".to_owned();
+                        ui.message = tr("ui.edit_cancelled").to_owned();
                     }
                 }
             }
@@ -176,12 +177,12 @@ fn handle_file_key(session: &mut Session, code: KeyCode, ui: &mut UiState) -> bo
             }
             KeyCode::Char('U') => {
                 merge.undo_all();
-                ui.message = "已撤销本文件全部块的决定".to_owned();
+                ui.message = tr("ui.undone_all").to_owned();
                 true
             }
             KeyCode::Char('a') => {
                 merge.apply_all_nonconflict();
-                ui.message = "已应用全部非冲突改动".to_owned();
+                ui.message = tr("ui.applied_all").to_owned();
                 true
             }
             KeyCode::Char('j') | KeyCode::Down => {
@@ -204,24 +205,24 @@ fn handle_file_key(session: &mut Session, code: KeyCode, ui: &mut UiState) -> bo
             // y 块结果 / Y 整个文件结果 / H 块本地侧 / L 块远端侧
             KeyCode::Char('y') => {
                 let lines = merge.current_content(merge.cursor);
-                ui.message = copy_feedback(&lines, "当前块结果");
+                ui.message = copy_feedback(&lines, tr("ui.copy_chunk"));
                 false
             }
             KeyCode::Char('Y') => {
                 ui.message = match copy_to_clipboard(&merge.resolved_content()) {
-                    Ok(()) => "已复制整个文件的当前结果".to_owned(),
-                    Err(e) => format!("复制失败:{e}"),
+                    Ok(()) => tr("ui.copied_file").to_owned(),
+                    Err(e) => tr_f("ui.copy_failed", &[("e", &e.to_string())]),
                 };
                 false
             }
             KeyCode::Char('H') => {
                 let lines = merge.chunks[merge.cursor].ours.clone();
-                ui.message = copy_feedback(&lines, "当前块本地侧");
+                ui.message = copy_feedback(&lines, tr("ui.copy_local"));
                 false
             }
             KeyCode::Char('L') => {
                 let lines = merge.chunks[merge.cursor].theirs.clone();
-                ui.message = copy_feedback(&lines, "当前块远端侧");
+                ui.message = copy_feedback(&lines, tr("ui.copy_remote"));
                 false
             }
             _ => false,
@@ -241,8 +242,11 @@ fn handle_file_key(session: &mut Session, code: KeyCode, ui: &mut UiState) -> bo
 /// 复制若干行到剪贴板并生成消息条反馈。
 fn copy_feedback(lines: &[String], what: &str) -> String {
     match copy_to_clipboard(&lines.join("\n")) {
-        Ok(()) => format!("已复制{what}({} 行)", lines.len()),
-        Err(e) => format!("复制失败:{e}"),
+        Ok(()) => tr_f(
+            "ui.copied",
+            &[("what", what), ("n", &lines.len().to_string())],
+        ),
+        Err(e) => tr_f("ui.copy_failed", &[("e", &e.to_string())]),
     }
 }
 
@@ -273,7 +277,7 @@ fn copy_to_clipboard(text: &str) -> Result<()> {
             return Ok(());
         }
     }
-    anyhow::bail!("未找到可用的剪贴板工具(pbcopy / xclip / wl-copy)")
+    anyhow::bail!("{}", tr("ui.no_clipboard"))
 }
 
 /// 写盘当前文件;成功返回 true。
@@ -287,7 +291,7 @@ fn write_current(
     ui: &mut UiState,
 ) -> Result<bool> {
     if !session.current_file().ready_to_write() {
-        ui.message = "仍有未解决的冲突,无法写入(n 跳到下一处冲突)".to_owned();
+        ui.message = tr("ui.unresolved").to_owned();
         return Ok(false);
     }
     let mut auto_applied = 0;
@@ -300,9 +304,12 @@ fn write_current(
     write_file(&path, &entry.resolved_bytes())?;
     session.mark_written();
     ui.message = if auto_applied > 0 {
-        format!("✔ 已写入 {path}(自动应用了 {auto_applied} 处非冲突改动)")
+        tr_f(
+            "ui.written_auto",
+            &[("path", &path), ("n", &auto_applied.to_string())],
+        )
     } else {
-        format!("✔ 已写入 {path}")
+        tr_f("ui.written", &[("path", &path)])
     };
     Ok(true)
 }
@@ -326,7 +333,7 @@ fn edit_lines(terminal: &mut DefaultTerminal, initial: &[String]) -> Result<Opti
     *terminal = ratatui::init();
     terminal.clear()?;
 
-    let status = status.with_context(|| format!("启动编辑器 {program} 失败"))?;
+    let status = status.with_context(|| tr_f("ui.editor_failed", &[("program", &program)]))?;
     if !status.success() {
         return Ok(None);
     }
@@ -377,6 +384,6 @@ mod tests {
         .unwrap();
         assert!(ok);
         assert_eq!(String::from_utf8(written).unwrap(), "a\nX\nc\nD\n");
-        assert!(ui.message.contains("自动应用"));
+        assert!(ui.message.contains("auto-applied"));
     }
 }

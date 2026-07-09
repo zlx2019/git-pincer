@@ -6,28 +6,29 @@ use std::path::Path;
 use anyhow::Result;
 
 use crate::git::{Git, RepoState};
+use crate::i18n::{tr, tr_f};
 
 /// 运行 abort 子命令。
 pub fn run(verbose: bool, dir: &Path) -> Result<()> {
     let git = Git::discover(dir, verbose)?;
     let state = git.state()?;
     if state == RepoState::Clean {
-        println!("[git-pincer] no conflict resolution in progress");
+        println!("[git-pincer] {}", tr("abort.none"));
         return Ok(());
     }
 
-    print!(
-        "Are you sure you want to abort the current {}? Completed progress will be lost. [y/N] ",
-        state.op_name()
-    );
+    print!("{} ", tr_f("abort.confirm", &[("op", state.op_name())]));
     io::stdout().flush()?;
     let mut answer = String::new();
     io::stdin().lock().read_line(&mut answer)?;
     if answer.trim().eq_ignore_ascii_case("y") {
         git.abort_op(state)?;
-        println!("[git-pincer] ✔ aborted {}", state.op_name());
+        println!(
+            "[git-pincer] {}",
+            tr_f("abort.done", &[("op", state.op_name())])
+        );
     } else {
-        println!("[git-pincer] cancelled");
+        println!("[git-pincer] {}", tr("abort.cancelled"));
     }
     Ok(())
 }

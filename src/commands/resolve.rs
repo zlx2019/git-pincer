@@ -5,6 +5,7 @@ use anyhow::{Result, bail};
 
 use crate::app::{FileEntry, FileMerge, Session};
 use crate::git::{ConflictedFile, Git, RepoState};
+use crate::i18n::{tr, tr_f};
 use crate::ui::{self, Outcome};
 
 /// 冲突解决主循环:解决全部文件 → `--continue` → 重新探测,
@@ -15,7 +16,7 @@ pub fn resolve_loop(git: &Git, light: bool) -> Result<()> {
         if files.is_empty() {
             let state = git.state()?;
             if state == RepoState::Clean {
-                println!("[git-pincer] ✔ 全部完成,仓库已回到干净状态");
+                println!("[git-pincer] {}", tr("resolve.all_done"));
                 return Ok(());
             }
             // 透传执行,git 与钩子的输出实时流向终端
@@ -27,17 +28,18 @@ pub fn resolve_loop(git: &Git, light: bool) -> Result<()> {
             // 非零退出:rebase 的下一个 commit 又冲突了则继续循环,否则如实报错
             if git.conflicted_files()?.is_empty() {
                 bail!(
-                    "git {} --continue 失败(git 输出见上方)。\n\
-                     提示:若是 pre-commit 钩子拒绝提交(fmt / clippy 等),\
-                     修复问题并 git add 后重新运行 git-pincer 即可继续,已解决的冲突不会丢失",
-                    state.op_name()
+                    "{}",
+                    tr_f("resolve.continue_failed", &[("op", state.op_name())])
                 );
             }
-            println!("[git-pincer] 进入下一轮,仍有冲突待解决");
+            println!("[git-pincer] {}", tr("resolve.next_round"));
             continue;
         }
 
-        println!("[git-pincer] {} 个文件存在冲突,进入解决界面…", files.len());
+        println!(
+            "[git-pincer] {}",
+            tr_f("resolve.found", &[("n", &files.len().to_string())])
+        );
         let mut session = build_session(git, &files)?;
         let outcome = ui::run_session(
             &mut session,
@@ -48,9 +50,7 @@ pub fn resolve_loop(git: &Git, light: bool) -> Result<()> {
             light,
         )?;
         if outcome == Outcome::Quit {
-            println!(
-                "[git-pincer] 已退出,现场保留;随时运行 git-pincer 继续,或 git-pincer abort 中止"
-            );
+            println!("[git-pincer] {}", tr("resolve.quit"));
             return Ok(());
         }
     }
@@ -61,7 +61,17 @@ fn build_session(git: &Git, files: &[ConflictedFile]) -> Result<Session> {
     let state = git.state()?;
     let mut entries = Vec::new();
     for (index, file) in files.iter().enumerate() {
-        println!("[{}/{}] 读取 {} …", index + 1, files.len(), file.path);
+        println!(
+            "{}",
+            tr_f(
+                "resolve.reading",
+                &[
+                    ("i", &(index + 1).to_string()),
+                    ("n", &files.len().to_string()),
+                    ("path", &file.path),
+                ],
+            )
+        );
         let read = |present: bool, stage: u8| -> Result<Vec<u8>> {
             if present {
                 Ok(git.read_stage(&file.path, stage)?)

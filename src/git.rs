@@ -329,7 +329,7 @@ impl Git {
             RepoState::Clean => {
                 return Err(GitError::Failed {
                     cmd: "--continue".to_owned(),
-                    stderr: "仓库当前没有进行中的合并操作".to_owned(),
+                    stderr: crate::i18n::tr("git.no_op").to_owned(),
                 });
             }
             other => other.op_name(),
@@ -343,7 +343,7 @@ impl Git {
             RepoState::Clean => {
                 return Err(GitError::Failed {
                     cmd: "--abort".to_owned(),
-                    stderr: "仓库当前没有进行中的合并操作".to_owned(),
+                    stderr: crate::i18n::tr("git.no_op").to_owned(),
                 });
             }
             other => other.op_name(),

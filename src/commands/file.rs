@@ -6,6 +6,7 @@ use anyhow::{Context, Result};
 use clap::Args;
 
 use crate::app::{FileEntry, FileMerge, Session};
+use crate::i18n::{tr, tr_f};
 use crate::merge::parse_conflict_file;
 use crate::ui::{self, Outcome};
 
@@ -22,8 +23,8 @@ pub fn run(args: FileArgs, light: bool) -> Result<()> {
         .with_context(|| format!("failed to read {}", args.path.display()))?;
     let result = parse_conflict_file(&text)?;
     println!(
-        "[git-pincer] Parsed {} conflicts, entering resolution interface…",
-        result.conflicts
+        "[git-pincer] {}",
+        tr_f("file.parsed", &[("n", &result.conflicts.to_string())])
     );
 
     let display = args.path.display().to_string();
@@ -39,8 +40,11 @@ pub fn run(args: FileArgs, light: bool) -> Result<()> {
         light,
     )?;
     match outcome {
-        Outcome::Completed => println!("[git-pincer] ✔ written {display}"),
-        Outcome::Quit => println!("[git-pincer] exited without changes"),
+        Outcome::Completed => println!(
+            "[git-pincer] {}",
+            tr_f("file.written", &[("path", &display)])
+        ),
+        Outcome::Quit => println!("[git-pincer] {}", tr("file.exited")),
     }
     Ok(())
 }

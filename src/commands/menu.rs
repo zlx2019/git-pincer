@@ -6,6 +6,7 @@ use std::path::Path;
 use anyhow::Result;
 
 use crate::git::{Git, RepoState};
+use crate::i18n::{tr, tr_f};
 use crate::ui::{self, MenuItem};
 
 use super::resolve::resolve_loop;
@@ -23,7 +24,7 @@ pub fn run(verbose: bool, dir: &Path, light: bool) -> Result<()> {
     }
     // 脚本 / 管道环境不弹菜单,保持静默安全
     if !std::io::stdout().is_terminal() {
-        println!("Currently, there are no conflicts that need to be resolved.");
+        println!("{}", tr("menu.no_conflicts"));
         return Ok(());
     }
     menu_loop(&git, light)
@@ -36,19 +37,15 @@ pub fn run(verbose: bool, dir: &Path, light: bool) -> Result<()> {
 /// 只有产生冲突才结束会话,回放捕获的 git 输出并进入解决循环。
 fn menu_loop(git: &Git, light: bool) -> Result<()> {
     let actions: Vec<MenuItem> = [
-        ("pull", "拉取远端", "从远端拉取最新提交,更新当前分支。"),
-        ("merge", "合并分支", "选择一个分支,合并进当前分支。"),
-        ("rebase", "变基分支", "把当前分支的提交重放到所选分支之上。"),
+        ("pull", tr("menu.pull_desc"), tr("menu.pull_hint")),
+        ("merge", tr("menu.merge_desc"), tr("menu.merge_hint")),
+        ("rebase", tr("menu.rebase_desc"), tr("menu.rebase_hint")),
         (
             "cherry-pick",
-            "摘取提交",
-            "摘取其他分支的提交,应用到当前分支。",
+            tr("menu.cherry_desc"),
+            tr("menu.cherry_hint"),
         ),
-        (
-            "revert",
-            "撤销提交",
-            "生成一个反向提交,撤销所选提交的改动。",
-        ),
+        ("revert", tr("menu.revert_desc"), tr("menu.revert_hint")),
     ]
     .into_iter()
     .map(|(label, desc, hint)| MenuItem::new(label, desc).with_hint(hint))
@@ -75,13 +72,13 @@ fn menu_loop(git: &Git, light: bool) -> Result<()> {
                         .map(|b| MenuItem::new(b, ""))
                         .collect();
                     if branches.is_empty() {
-                        session.notice("提示", "没有可选的目标分支")?;
+                        session.notice(tr("menu.notice_info"), tr("menu.no_branches"))?;
                         continue;
                     }
                     let title = if action == 1 {
-                        "merge:选择要合并进来的分支"
+                        tr("menu.pick_merge")
                     } else {
-                        "rebase:选择变基目标分支"
+                        tr("menu.pick_rebase")
                     };
                     let Some(idx) = session.pick(title, &branches, None, 0)? else {
                         continue;
@@ -103,13 +100,13 @@ fn menu_loop(git: &Git, light: bool) -> Result<()> {
                         .map(|(hash, subject)| MenuItem::new(hash, subject))
                         .collect();
                     if commits.is_empty() {
-                        session.notice("提示", "没有可选的提交")?;
+                        session.notice(tr("menu.notice_info"), tr("menu.no_commits"))?;
                         continue;
                     }
                     let title = if others_only {
-                        "cherry-pick:选择要摘取的提交"
+                        tr("menu.pick_cherry")
                     } else {
-                        "revert:选择要撤销的提交"
+                        tr("menu.pick_revert")
                     };
                     let Some(idx) = session.pick(title, &commits, None, 0)? else {
                         continue;
@@ -127,14 +124,14 @@ fn menu_loop(git: &Git, light: bool) -> Result<()> {
             let refs: Vec<&str> = cmd.iter().map(String::as_str).collect();
             match run::launch_captured(git, &refs)? {
                 run::LaunchOutcome::Failed(reason) => {
-                    session.notice(&format!("git {} 失败", cmd[0]), &reason)?;
+                    session.notice(&tr_f("menu.failed", &[("cmd", &cmd[0])]), &reason)?;
                 }
                 run::LaunchOutcome::Success(out) => {
                     let body = compose_notice(
                         &String::from_utf8_lossy(&out.stdout),
                         &String::from_utf8_lossy(&out.stderr),
                     );
-                    session.notice(&format!("git {} 完成", cmd[0]), &body)?;
+                    session.notice(&tr_f("menu.done", &[("cmd", &cmd[0])]), &body)?;
                 }
                 run::LaunchOutcome::Conflicts(out) => break (cmd, out),
             }
@@ -168,12 +165,16 @@ fn compose_notice(stdout: &str, stderr: &str) -> String {
         text.push_str(err);
     }
     if text.trim().is_empty() {
-        return "(无输出)".to_owned();
+        return tr("menu.no_output").to_owned();
     }
     let lines: Vec<&str> = text.lines().collect();
     if lines.len() > NOTICE_LINES {
         let skipped = lines.len() - NOTICE_LINES;
-        format!("……(已省略前 {skipped} 行)\n{}", lines[skipped..].join("\n"))
+        format!(
+            "{}\n{}",
+            tr_f("menu.skipped", &[("n", &skipped.to_string())]),
+            lines[skipped..].join("\n")
+        )
     } else {
         text
     }
@@ -186,7 +187,7 @@ mod tests {
     /// 空输出时给出占位提示
     #[test]
     fn compose_notice_empty_output() {
-        assert_eq!(compose_notice("", "  \n"), "(无输出)");
+        assert_eq!(compose_notice("", "  \n"), "(no output)");
     }
 
     /// stdout 与 stderr 顺序合并,去掉尾部空白
@@ -206,7 +207,7 @@ mod tests {
             .collect::<Vec<_>>()
             .join("\n");
         let got = compose_notice(&long, "");
-        assert!(got.starts_with("……(已省略前 5 行)"));
+        assert!(got.starts_with("… (first 5 lines omitted)"));
         assert!(got.ends_with("line20"));
         assert_eq!(got.lines().count(), NOTICE_LINES + 1);
     }

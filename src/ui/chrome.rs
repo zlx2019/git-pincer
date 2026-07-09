@@ -1,5 +1,6 @@
 //! 界面整体绘制:状态栏、提示条、消息条、帮助浮层与二进制视图。
 
+use crate::i18n::{tr, tr_f};
 use ratatui::Frame;
 use ratatui::layout::{Constraint, Layout, Rect};
 use ratatui::style::{Modifier, Style};
@@ -80,7 +81,16 @@ fn draw_header(frame: &mut Frame, area: Rect, session: &Session, theme: &Theme) 
             Style::new().fg(theme.border),
         ),
         Span::styled(
-            format!(" {}/{} 文件 ", session.current + 1, total),
+            format!(
+                " {} ",
+                tr_f(
+                    "ui.files_badge",
+                    &[
+                        ("i", &(session.current + 1).to_string()),
+                        ("n", &total.to_string()),
+                    ],
+                )
+            ),
             Style::new().fg(theme.fg_bright),
         ),
         sep.clone(),
@@ -89,12 +99,15 @@ fn draw_header(frame: &mut Frame, area: Rect, session: &Session, theme: &Theme) 
     ];
     if pending > 0 {
         spans.push(Span::styled(
-            format!(" ✗ {pending} 冲突待解决"),
+            format!(
+                " {}",
+                tr_f("ui.conflicts_pending", &[("n", &pending.to_string())])
+            ),
             Style::new().fg(theme.red).add_modifier(Modifier::BOLD),
         ));
     } else {
         spans.push(Span::styled(
-            " ✓ 本文件已就绪(w 写盘)",
+            format!(" {}", tr("ui.file_ready")),
             Style::new().fg(theme.green),
         ));
     }
@@ -124,11 +137,7 @@ fn draw_binary(
     frame.render_widget(
         Paragraph::new(vec![
             Line::styled(path.to_owned(), Style::new().add_modifier(Modifier::BOLD)).centered(),
-            Line::styled(
-                "二进制文件无法逐块合并,请整体选择一侧",
-                Style::new().fg(theme.amber),
-            )
-            .centered(),
+            Line::styled(tr("ui.binary_notice"), Style::new().fg(theme.amber)).centered(),
         ]),
         notice,
     );
@@ -160,7 +169,7 @@ fn draw_binary(
 
     frame.render_widget(
         Paragraph::new(Line::styled(
-            "h / l 选择 · u 撤销 · 选择后 w 写盘",
+            tr("ui.binary_keys"),
             Style::new().fg(theme.fg_dim),
         ))
         .centered(),
@@ -197,11 +206,15 @@ fn binary_card(
     frame.render_widget(
         Paragraph::new(vec![
             Line::styled(
-                format!("{} 字节", bytes.len()),
+                tr_f("ui.bytes", &[("n", &bytes.len().to_string())]),
                 Style::new().fg(theme.fg_bright),
             )
             .centered(),
-            Line::styled(format!("按 {key} 选择"), Style::new().fg(theme.fg_dim)).centered(),
+            Line::styled(
+                tr_f("ui.press_pick", &[("key", key)]),
+                Style::new().fg(theme.fg_dim),
+            )
+            .centered(),
         ]),
         inner,
     );
@@ -217,21 +230,21 @@ fn keycap(key: &str, theme: &Theme) -> Span<'static> {
 
 /// 底部按键提示条(键帽 + 描述)。
 fn draw_hints(frame: &mut Frame, area: Rect, theme: &Theme) {
-    const ITEMS: [(&str, &str); 11] = [
-        ("h", "取左"),
-        ("l", "取右"),
-        ("x", "忽略"),
-        ("u/U", "撤销"),
-        ("e", "编辑"),
-        ("n/p", "冲突"),
-        ("w", "写盘"),
-        ("⇥", "文件"),
-        ("z", "折叠"),
-        ("q", "退出"),
-        ("?", "帮助"),
+    let items: [(&str, &str); 11] = [
+        ("h", tr("ui.hint_left")),
+        ("l", tr("ui.hint_right")),
+        ("x", tr("ui.hint_ignore")),
+        ("u/U", tr("ui.hint_undo")),
+        ("e", tr("ui.hint_edit")),
+        ("n/p", tr("ui.hint_conflict")),
+        ("w", tr("ui.hint_write")),
+        ("⇥", tr("ui.hint_file")),
+        ("z", tr("ui.hint_fold")),
+        ("q", tr("ui.hint_quit")),
+        ("?", tr("ui.hint_help")),
     ];
     let mut spans = vec![Span::raw(" ")];
-    for (key, desc) in ITEMS {
+    for (key, desc) in items {
         spans.push(keycap(key, theme));
         spans.push(Span::styled(
             format!(" {desc}  "),
@@ -243,25 +256,25 @@ fn draw_hints(frame: &mut Frame, area: Rect, theme: &Theme) {
 
 /// 帮助浮层:圆角边框 + 双栏按键布局。
 fn draw_help(frame: &mut Frame, theme: &Theme) {
-    const LEFT: [(&str, &str); 8] = [
-        ("h / ←", "取用本地(两侧先后取用=都要)"),
-        ("l / →", "取用远端改动"),
-        ("x", "忽略未处理的侧(保留 base)"),
-        ("u / U", "撤销当前块 / 全部块"),
-        ("e", "$EDITOR 编辑当前块"),
-        ("a", "应用全部非冲突改动"),
-        ("w", "写盘(自动应用非冲突)"),
-        ("q", "退出(现场保留)"),
+    let left_items: [(&str, &str); 8] = [
+        ("h / ←", tr("ui.help_left")),
+        ("l / →", tr("ui.help_right")),
+        ("x", tr("ui.help_ignore")),
+        ("u / U", tr("ui.help_undo")),
+        ("e", tr("ui.help_edit")),
+        ("a", tr("ui.help_apply")),
+        ("w", tr("ui.help_write")),
+        ("q", tr("ui.help_quit")),
     ];
-    const RIGHT: [(&str, &str); 8] = [
-        ("j / k", "上下移动改动块"),
-        ("n / p", "下/上一个未解决冲突"),
-        ("Tab", "切换到下一个文件"),
-        ("z", "折叠/展开未改动区域"),
-        ("y", "复制当前块结果"),
-        ("Y", "复制整个文件结果"),
-        ("H / L", "复制块的本地/远端侧"),
-        ("?", "打开本帮助"),
+    let right_items: [(&str, &str); 8] = [
+        ("j / k", tr("ui.help_move")),
+        ("n / p", tr("ui.help_jump")),
+        ("Tab", tr("ui.help_tab")),
+        ("z", tr("ui.help_fold")),
+        ("y", tr("ui.help_copy_chunk")),
+        ("Y", tr("ui.help_copy_file")),
+        ("H / L", tr("ui.help_copy_sides")),
+        ("?", tr("ui.help_help")),
     ];
     let column = |entries: &[(&str, &str)]| -> Vec<Line<'static>> {
         entries
@@ -284,14 +297,14 @@ fn draw_help(frame: &mut Frame, theme: &Theme) {
         .border_type(BorderType::Rounded)
         .border_style(Style::new().fg(theme.border))
         .title(Span::styled(
-            " 按键说明 ",
+            format!(" {} ", tr("ui.help_title")),
             Style::new()
                 .fg(theme.fg_bright)
                 .add_modifier(Modifier::BOLD),
         ))
         .title_bottom(
             Line::from(Span::styled(
-                " 按任意键关闭 ",
+                format!(" {} ", tr("common.close_any_key")),
                 Style::new().fg(theme.fg_dim),
             ))
             .centered(),
@@ -300,8 +313,8 @@ fn draw_help(frame: &mut Frame, theme: &Theme) {
     frame.render_widget(block, area);
     let [left, right] =
         Layout::horizontal([Constraint::Percentage(50), Constraint::Percentage(50)]).areas(inner);
-    frame.render_widget(Paragraph::new(column(&LEFT)), left);
-    frame.render_widget(Paragraph::new(column(&RIGHT)), right);
+    frame.render_widget(Paragraph::new(column(&left_items)), left);
+    frame.render_widget(Paragraph::new(column(&right_items)), right);
 }
 
 /// 居中的浮层矩形(不超出屏幕)。
@@ -349,7 +362,7 @@ mod tests {
         assert!(content.contains("RESULT"));
         assert!(content.contains("REMOTE"));
         // 未解决冲突:结果栏占位带 + 两侧 gutter 取用箭头
-        assert!(content.contains("待解决"));
+        assert!(content.contains("pending"));
         assert!(content.contains("»"));
         assert!(content.contains("«"));
     }

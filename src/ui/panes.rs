@@ -1,5 +1,6 @@
 //! 三栏正文渲染:圆角边框面板、色带、词级强调、选中指示、行号、折叠横线与滚动条。
 
+use crate::i18n::{tr, tr_f};
 use std::ops::Range;
 
 use ratatui::Frame;
@@ -103,7 +104,7 @@ fn fold_line(n: usize, pane: Pane, inner: u16, theme: &Theme) -> Line<'static> {
     }
     // 中栏标签按可用宽度降级:完整文案 → 精简 → 纯横线
     let text = if inner >= 30 {
-        format!("── ⋯ {n} 行未改动 (z 展开) ⋯ ──")
+        tr_f("ui.fold", &[("n", &n.to_string())])
     } else if inner >= 12 {
         format!("─ ⋯ {n} ⋯ ─")
     } else {
@@ -175,7 +176,7 @@ fn cell_line(
         Cell::Empty => return Line::from(spans).style(style),
         Cell::Placeholder => {
             spans.push(Span::styled(
-                "⋯ 待解决 ⋯",
+                tr("ui.pending"),
                 Style::new().fg(theme.placeholder_fg),
             ));
             return Line::from(spans).style(style);
