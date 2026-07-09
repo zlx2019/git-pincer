@@ -44,8 +44,6 @@ pub(crate) struct Theme {
     pub(crate) placeholder_fg: Color,
     /// RPG 菜单:双线窗框与嵌入标题(米白)
     pub(crate) rpg_frame: Color,
-    /// RPG 菜单:面板硬阴影
-    pub(crate) rpg_shadow: Color,
     /// RPG 菜单:强调橙(选中行 / 光标符号)
     pub(crate) rpg_accent: Color,
     /// RPG 菜单:HP 条(绿)
@@ -105,7 +103,6 @@ impl Theme {
             logo: term_color(255, 118, 48),
             placeholder_fg: term_color(196, 132, 138),
             rpg_frame: term_color(234, 225, 198),
-            rpg_shadow: term_color(3, 5, 9),
             rpg_accent: term_color(255, 122, 47),
             rpg_hp: term_color(126, 224, 138),
             rpg_mp: term_color(108, 178, 255),
@@ -142,7 +139,6 @@ impl Theme {
             logo: term_color(214, 77, 0),
             placeholder_fg: term_color(158, 70, 76),
             rpg_frame: term_color(90, 74, 47),
-            rpg_shadow: term_color(206, 200, 184),
             rpg_accent: term_color(217, 95, 16),
             rpg_hp: term_color(58, 150, 72),
             rpg_mp: term_color(36, 110, 196),

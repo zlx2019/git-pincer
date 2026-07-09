@@ -297,7 +297,6 @@ fn draw_pick(
         .min(area.height.saturating_sub(3))
         .max(3);
     let panel = place_panel(frame, width, panel_h, false, theme);
-    hard_shadow(frame, panel, theme);
 
     let block = rpg_block(title, theme).title_bottom(
         Line::from(Span::styled(
@@ -355,7 +354,7 @@ fn draw_rpg_menu(
     }
     let width = 48u16.min(area.width.saturating_sub(4));
     let menu_h = items.len() as u16 + 2;
-    // 各段高度:指令窗与按键行常驻,其余按剩余空间取舍(阴影各占 1 行)
+    // 各段高度:指令窗与按键行常驻,其余按剩余空间取舍(面板间各空 1 行)
     let total = |logo: bool, status: bool, hint: bool| -> u16 {
         menu_h
             + 2
@@ -414,7 +413,6 @@ fn draw_rpg_menu(
             height: 6,
         };
         y += 7;
-        hard_shadow(frame, panel, theme);
         frame.render_widget(Clear, panel);
         let inner = width.saturating_sub(6) as usize;
         frame.render_widget(
@@ -431,7 +429,6 @@ fn draw_rpg_menu(
             height: menu_h,
         };
         y += menu_h + 1;
-        hard_shadow(frame, panel, theme);
         frame.render_widget(Clear, panel);
         let inner = width.saturating_sub(6) as usize;
         let rows: Vec<Line<'static>> = items
@@ -462,7 +459,6 @@ fn draw_rpg_menu(
             height: 3,
         };
         y += 4;
-        hard_shadow(frame, panel, theme);
         frame.render_widget(Clear, panel);
         let inner = width.saturating_sub(6) as usize;
         let item = &items[cursor];
@@ -645,21 +641,6 @@ fn keycap(text: &str, theme: &Theme) -> Span<'static> {
     )
 }
 
-/// 面板右下一格偏移的硬阴影(RPG 窗口立体感);需在面板内容之前绘制。
-fn hard_shadow(frame: &mut Frame, panel: Rect, theme: &Theme) {
-    let shadow = Rect {
-        x: panel.x + 1,
-        y: panel.y + 1,
-        width: panel.width,
-        height: panel.height,
-    }
-    .intersection(frame.area());
-    frame.render_widget(
-        Block::new().style(Style::new().bg(theme.rpg_shadow)),
-        shadow,
-    );
-}
-
 /// 计算面板宽度:按内容自适应;带 logo 的页面加宽到与 logo 齐宽,不超出屏幕。
 fn panel_width(content_w: usize, logo: bool, area: Rect) -> u16 {
     let art_w = logo_art().iter().map(Line::width).max().unwrap_or(0) as u16;
@@ -739,7 +720,6 @@ fn draw_flash(frame: &mut Frame, cmd_line: &str, theme: &Theme) {
         area,
     );
     let panel = place_panel(frame, width, 3, true, theme);
-    hard_shadow(frame, panel, theme);
     let line = Line::from(vec![
         Span::styled(
             cmd_line.to_owned(),
@@ -790,7 +770,6 @@ fn draw_notice(frame: &mut Frame, title: &str, body: &str, theme: &Theme) {
         width,
         height,
     };
-    hard_shadow(frame, panel, theme);
 
     let block = Block::bordered()
         .border_type(BorderType::Double)
