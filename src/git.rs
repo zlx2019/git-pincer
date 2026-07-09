@@ -76,6 +76,21 @@ pub struct ConflictedFile {
     pub has_theirs: bool,
 }
 
+/// 仓库体征:主菜单 RPG 状态面板展示的数据,打开菜单时查询一次。
+#[derive(Debug, Clone)]
+pub struct RepoVitals {
+    /// 当前分支名(detached HEAD 时为 "HEAD")
+    pub branch: String,
+    /// 工作区 + 暂存区改动条目数
+    pub changes: usize,
+    /// stash 条目数
+    pub stashes: usize,
+    /// 领先上游的提交数;未设置上游分支时为 None
+    pub ahead: Option<usize>,
+    /// HEAD 可达的提交总数(空仓库为 0)
+    pub level: usize,
+}
+
 /// git 调用上下文:锚定仓库根目录,verbose 时回显执行的命令。
 pub struct Git {
     /// 仓库根目录;所有命令经 `-C` 锚定,路径统一为根相对
@@ -255,6 +270,46 @@ impl Git {
             .lines()
             .map(str::to_owned)
             .collect())
+    }
+
+    /// 探测仓库体征:分支、改动数、贮藏数、待推送数与提交总数。
+    ///
+    /// 均为廉价的本地查询;`ahead` / `level` 在无上游 / 空仓库时
+    /// 查询会非零退出,分别归一化为 None / 0 而非报错。
+    pub fn vitals(&self) -> Result<RepoVitals, GitError> {
+        let branch = {
+            let out = self.run_ok(&["branch", "--show-current"])?;
+            let name = String::from_utf8_lossy(&out.stdout).trim().to_owned();
+            if name.is_empty() {
+                "HEAD".to_owned()
+            } else {
+                name
+            }
+        };
+        let changes = {
+            let out = self.run_ok(&["status", "--porcelain"])?;
+            String::from_utf8_lossy(&out.stdout).lines().count()
+        };
+        let stashes = {
+            let out = self.run_ok(&["stash", "list"])?;
+            String::from_utf8_lossy(&out.stdout).lines().count()
+        };
+        let count = |args: &[&str]| -> Result<Option<usize>, GitError> {
+            let out = self.run(args)?;
+            if !out.status.success() {
+                return Ok(None);
+            }
+            Ok(String::from_utf8_lossy(&out.stdout).trim().parse().ok())
+        };
+        let ahead = count(&["rev-list", "--count", "@{upstream}..HEAD"])?;
+        let level = count(&["rev-list", "--count", "HEAD"])?.unwrap_or(0);
+        Ok(RepoVitals {
+            branch,
+            changes,
+            stashes,
+            ahead,
+            level,
+        })
     }
 
     /// 将解决后的内容写入工作区文件并 `git add`。

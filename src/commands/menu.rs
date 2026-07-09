@@ -36,14 +36,22 @@ pub fn run(verbose: bool, dir: &Path, light: bool) -> Result<()> {
 /// 只有产生冲突才结束会话,回放捕获的 git 输出并进入解决循环。
 fn menu_loop(git: &Git, light: bool) -> Result<()> {
     let actions: Vec<MenuItem> = [
-        ("pull", "拉取远端"),
-        ("merge", "合并分支"),
-        ("rebase", "变基分支"),
-        ("cherry-pick", "摘取提交"),
-        ("revert", "撤销提交"),
+        ("pull", "拉取远端", "从远端拉取最新提交,更新当前分支。"),
+        ("merge", "合并分支", "选择一个分支,合并进当前分支。"),
+        ("rebase", "变基分支", "把当前分支的提交重放到所选分支之上。"),
+        (
+            "cherry-pick",
+            "摘取提交",
+            "摘取其他分支的提交,应用到当前分支。",
+        ),
+        (
+            "revert",
+            "撤销提交",
+            "生成一个反向提交,撤销所选提交的改动。",
+        ),
     ]
     .into_iter()
-    .map(|(label, desc)| MenuItem::new(label, desc))
+    .map(|(label, desc, hint)| MenuItem::new(label, desc).with_hint(hint))
     .collect();
 
     // 一级菜单上次选中的操作,从二级返回时光标停在原处
@@ -51,7 +59,9 @@ fn menu_loop(git: &Git, light: bool) -> Result<()> {
     let (cmd, out) = {
         let mut session = ui::MenuSession::open(light)?;
         loop {
-            let Some(action) = session.pick("", &actions, true, last_action)? else {
+            // 每轮重新探测仓库体征,保证执行过命令后状态窗数据仍然准确
+            let vitals = git.vitals()?;
+            let Some(action) = session.pick("", &actions, Some(&vitals), last_action)? else {
                 return Ok(());
             };
             last_action = action;
@@ -73,7 +83,7 @@ fn menu_loop(git: &Git, light: bool) -> Result<()> {
                     } else {
                         "rebase:选择变基目标分支"
                     };
-                    let Some(idx) = session.pick(title, &branches, false, 0)? else {
+                    let Some(idx) = session.pick(title, &branches, None, 0)? else {
                         continue;
                     };
                     let target = branches[idx].label.clone();
@@ -101,7 +111,7 @@ fn menu_loop(git: &Git, light: bool) -> Result<()> {
                     } else {
                         "revert:选择要撤销的提交"
                     };
-                    let Some(idx) = session.pick(title, &commits, false, 0)? else {
+                    let Some(idx) = session.pick(title, &commits, None, 0)? else {
                         continue;
                     };
                     let hash = commits[idx].label.clone();

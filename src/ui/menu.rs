@@ -18,6 +18,8 @@ use ratatui::widgets::{
 
 use std::sync::OnceLock;
 
+use crate::git::RepoVitals;
+
 use super::theme::{Theme, term_color};
 
 /// 主菜单 logo 字符画,编译期嵌入。
@@ -118,6 +120,8 @@ pub(crate) struct MenuItem {
     pub(crate) label: String,
     /// 右列描述;为空时只渲染标签
     pub(crate) desc: String,
+    /// 主菜单底部说明窗的长描述;为空时回退到 desc
+    pub(crate) hint: String,
 }
 
 impl MenuItem {
@@ -126,13 +130,28 @@ impl MenuItem {
         Self {
             label: label.into(),
             desc: desc.into(),
+            hint: String::new(),
         }
+    }
+
+    /// 附加说明窗长描述。
+    pub(crate) fn with_hint(mut self, hint: impl Into<String>) -> Self {
+        self.hint = hint.into();
+        self
     }
 }
 
-/// 估算终端显示宽度(CJK 记 2 列,其余记 1 列)。
+/// 估算终端显示宽度(CJK 记 2 列;箭头 / 制表 / 块元素 / 几何符号记 1 列)。
 fn display_width(s: &str) -> usize {
-    s.chars().map(|c| if c.is_ascii() { 1 } else { 2 }).sum()
+    s.chars()
+        .map(|c| {
+            if c.is_ascii() || ('\u{2190}'..='\u{25FF}').contains(&c) {
+                1
+            } else {
+                2
+            }
+        })
+        .sum()
 }
 
 /// 光标回绕移动:`delta` 为 +1 / -1。
@@ -164,13 +183,13 @@ impl MenuSession {
     }
 
     /// 运行单选列表页;返回选中项下标,None 表示取消(q / Esc)或列表为空。
-    /// `logo` 为 true 时在列表上方绘制 Ferris(主菜单用);
-    /// `initial` 为光标初始位置(从下级页面返回时停在上次的选项上)。
+    /// `vitals` 为 Some 时渲染完整 RPG 主菜单页(字标 + 状态窗 + 说明窗),
+    /// 否则渲染普通双线框列表;`initial` 为光标初始位置。
     pub(crate) fn pick(
         &mut self,
         title: &str,
         items: &[MenuItem],
-        logo: bool,
+        vitals: Option<&RepoVitals>,
         initial: usize,
     ) -> Result<Option<usize>> {
         if items.is_empty() {
@@ -178,7 +197,14 @@ impl MenuSession {
         }
         // 清屏强制全量重绘,抹掉上一页的残留(各页面板尺寸不同)
         self.terminal.clear()?;
-        pick_loop(&mut self.terminal, title, items, logo, initial, &self.theme)
+        pick_loop(
+            &mut self.terminal,
+            title,
+            items,
+            vitals,
+            initial,
+            &self.theme,
+        )
     }
 
     /// 展示消息弹框(如失败原因),任意键关闭。
@@ -209,7 +235,7 @@ fn pick_loop(
     terminal: &mut ratatui::DefaultTerminal,
     title: &str,
     items: &[MenuItem],
-    logo: bool,
+    vitals: Option<&RepoVitals>,
     initial: usize,
     theme: &Theme,
 ) -> Result<Option<usize>> {
@@ -218,7 +244,10 @@ fn pick_loop(
     let mut list = ListState::default();
     loop {
         list.select(Some(cursor));
-        terminal.draw(|frame| draw_pick(frame, title, items, logo, &mut list, theme))?;
+        terminal.draw(|frame| match vitals {
+            Some(v) => draw_rpg_menu(frame, items, cursor, v, theme),
+            None => draw_pick(frame, title, items, &mut list, theme),
+        })?;
         let Event::Key(key) = event::read()? else {
             continue;
         };
@@ -235,13 +264,15 @@ fn pick_loop(
     }
 }
 
-/// 绘制居中的选择浮层:圆角边框 + 内边距 + 可选 Ferris logo
-/// + 两列分色列表 + 底部按键提示。
+/// 状态条的总格数。
+const GAUGE_CELLS: usize = 10;
+
+/// 绘制二级选择列表:双线窗框 + 嵌入标题 + 选中行橙底反色,
+/// 与主菜单同一套 RPG 视觉;长列表由 [`ListState`] 滚动。
 fn draw_pick(
     frame: &mut Frame,
     title: &str,
     items: &[MenuItem],
-    logo: bool,
     list_state: &mut ListState,
     theme: &Theme,
 ) {
@@ -260,76 +291,373 @@ fn draw_pick(
         })
         .max()
         .unwrap_or(0);
-    // 边框 2 + 左右内边距 4 + 选中符号 2
-    let width = panel_width(content_w + 8, logo, area);
-    // 边框 2 + 上下内边距 2
-    let panel_h = (items.len() as u16 + 4)
-        .min(area.height.saturating_sub(2))
-        .max(5);
-    let panel = place_panel(frame, width, panel_h, logo, theme);
+    // 边框 2 + 左右内边距 4 + 选中符号 2 + 余量 2
+    let width = panel_width(content_w + 10, false, area);
+    let panel_h = (items.len() as u16 + 2)
+        .min(area.height.saturating_sub(3))
+        .max(3);
+    let panel = place_panel(frame, width, panel_h, false, theme);
+    hard_shadow(frame, panel, theme);
 
-    let mut block = Block::bordered()
-        .border_type(BorderType::Rounded)
-        .border_style(Style::new().fg(theme.border))
-        .padding(Padding::new(2, 2, 1, 1))
-        .title_bottom(
-            Line::from(Span::styled(
-                " j/k 移动 · Enter 确认 · q 取消 ",
-                Style::new().fg(theme.fg_dim),
-            ))
-            .centered(),
-        );
-    // 标题可选:主菜单不设标题(logo 已表明身份),二级列表用标题说明语境
-    if !title.trim().is_empty() {
-        block = block.title(Span::styled(
-            format!(" {} ", title.trim()),
-            Style::new().fg(theme.blue).add_modifier(Modifier::BOLD),
-        ));
-    }
+    let block = rpg_block(title, theme).title_bottom(
+        Line::from(Span::styled(
+            " J/K 移动 · Enter 确认 · Q 返回 ",
+            Style::new().fg(theme.fg_dim),
+        ))
+        .centered(),
+    );
 
-    // 列表内容可用宽度 = 面板宽 - 边框 2 - 内边距 4 - 选中符号 2
-    let inner_w = width.saturating_sub(8) as usize;
+    let selected = list_state.selected().unwrap_or(0);
     let rows: Vec<ListItem<'static>> = items
         .iter()
-        .map(|item| {
-            let mut spans = vec![Span::styled(
-                format!(
-                    "{}{}",
-                    item.label,
-                    " ".repeat(label_w.saturating_sub(display_width(&item.label)))
+        .enumerate()
+        .map(|(i, item)| {
+            let sel = i == selected;
+            let mut spans = vec![
+                cursor_span(sel, theme),
+                Span::styled(
+                    format!(
+                        "{}{}",
+                        item.label,
+                        " ".repeat(label_w.saturating_sub(display_width(&item.label)))
+                    ),
+                    label_style(sel, theme),
                 ),
-                Style::new().fg(theme.blue),
-            )];
+            ];
             if !item.desc.is_empty() {
-                // 主菜单标签与描述分居两端(面板宽);普通列表描述紧随标签
-                let gap = if logo {
-                    inner_w
-                        .saturating_sub(label_w + display_width(&item.desc))
-                        .max(2)
-                } else {
-                    2
-                };
-                spans.push(Span::raw(" ".repeat(gap)));
+                spans.push(Span::raw("  "));
                 spans.push(Span::styled(
                     item.desc.clone(),
-                    Style::new().fg(theme.hint_fg),
+                    Style::new().fg(if sel { theme.hint_fg } else { theme.fg_dim }),
                 ));
             }
             ListItem::new(Line::from(spans))
         })
         .collect();
-    // 整行高亮:只改背景并加粗,保留两列各自的前景色
-    let list = List::new(rows)
-        .block(block)
-        .highlight_symbol("▶ ")
-        .highlight_style(
-            Style::new()
-                .bg(theme.keycap_bg)
-                .add_modifier(Modifier::BOLD),
-        );
+    let list = List::new(rows).block(block);
 
     frame.render_widget(Clear, panel);
     frame.render_stateful_widget(list, panel, list_state);
+}
+
+/// 绘制 RPG 风格主菜单页:PINCER 字标、分隔线、状态窗、指令窗、
+/// 说明窗与按键提示;高度不足时按「字标 → 状态窗 → 说明窗」顺序降级。
+fn draw_rpg_menu(
+    frame: &mut Frame,
+    items: &[MenuItem],
+    cursor: usize,
+    vitals: &RepoVitals,
+    theme: &Theme,
+) {
+    let area = frame.area();
+    if area.width < 20 || area.height < 5 {
+        return;
+    }
+    let width = 48u16.min(area.width.saturating_sub(4));
+    let menu_h = items.len() as u16 + 2;
+    // 各段高度:指令窗与按键行常驻,其余按剩余空间取舍(阴影各占 1 行)
+    let total = |logo: bool, status: bool, hint: bool| -> u16 {
+        menu_h
+            + 2
+            + if logo { 4 } else { 0 }
+            + if status { 7 } else { 0 }
+            + if hint { 4 } else { 0 }
+    };
+    let mut show_logo = true;
+    let mut show_status = true;
+    let mut show_hint = true;
+    if total(show_logo, show_status, show_hint) > area.height {
+        show_logo = false;
+    }
+    if total(show_logo, show_status, show_hint) > area.height {
+        show_status = false;
+    }
+    if total(show_logo, show_status, show_hint) > area.height {
+        show_hint = false;
+    }
+    let mut need = total(show_logo, show_status, show_hint);
+    // 高度富余时,字标与分隔线前后各留一行呼吸空隙
+    let breathe = u16::from(show_logo && area.height >= need + 2);
+    need += breathe * 2;
+
+    let x = area.x + area.width.saturating_sub(width) / 2;
+    let mut y = area.y + area.height.saturating_sub(need) / 2;
+
+    if show_logo {
+        let art = tinted_logo(theme);
+        let logo_w = art.iter().map(Line::width).max().unwrap_or(0) as u16;
+        let logo_area = Rect {
+            x: area.x + area.width.saturating_sub(logo_w) / 2,
+            y,
+            width: logo_w,
+            height: art.len() as u16,
+        };
+        y += logo_area.height + breathe;
+        frame.render_widget(Paragraph::new(art), logo_area);
+        frame.render_widget(
+            Paragraph::new(divider_line("◆ 选择你的指令 ◆", width, theme)),
+            Rect {
+                x,
+                y,
+                width,
+                height: 1,
+            },
+        );
+        y += 1 + breathe;
+    }
+
+    if show_status {
+        let panel = Rect {
+            x,
+            y,
+            width,
+            height: 6,
+        };
+        y += 7;
+        hard_shadow(frame, panel, theme);
+        frame.render_widget(Clear, panel);
+        let inner = width.saturating_sub(6) as usize;
+        frame.render_widget(
+            Paragraph::new(status_rows(vitals, inner, theme)).block(rpg_block("状 态", theme)),
+            panel,
+        );
+    }
+
+    {
+        let panel = Rect {
+            x,
+            y,
+            width,
+            height: menu_h,
+        };
+        y += menu_h + 1;
+        hard_shadow(frame, panel, theme);
+        frame.render_widget(Clear, panel);
+        let inner = width.saturating_sub(6) as usize;
+        let rows: Vec<Line<'static>> = items
+            .iter()
+            .enumerate()
+            .map(|(i, item)| {
+                let sel = i == cursor;
+                let desc_style = Style::new().fg(if sel { theme.hint_fg } else { theme.fg_dim });
+                let gap = inner
+                    .saturating_sub(2 + display_width(&item.label) + display_width(&item.desc))
+                    .max(1);
+                Line::from(vec![
+                    cursor_span(sel, theme),
+                    Span::styled(item.label.clone(), label_style(sel, theme)),
+                    Span::raw(" ".repeat(gap)),
+                    Span::styled(item.desc.clone(), desc_style),
+                ])
+            })
+            .collect();
+        frame.render_widget(Paragraph::new(rows).block(rpg_block("指 令", theme)), panel);
+    }
+
+    if show_hint {
+        let panel = Rect {
+            x,
+            y,
+            width,
+            height: 3,
+        };
+        y += 4;
+        hard_shadow(frame, panel, theme);
+        frame.render_widget(Clear, panel);
+        let inner = width.saturating_sub(6) as usize;
+        let item = &items[cursor];
+        let hint = if item.hint.is_empty() {
+            &item.desc
+        } else {
+            &item.hint
+        };
+        let gap = inner.saturating_sub(display_width(hint) + 1).max(1);
+        let row = Line::from(vec![
+            Span::styled(hint.clone(), Style::new().fg(theme.hint_fg)),
+            Span::raw(" ".repeat(gap)),
+            Span::styled(
+                "▼",
+                Style::new()
+                    .fg(theme.rpg_accent)
+                    .add_modifier(Modifier::SLOW_BLINK),
+            ),
+        ]);
+        frame.render_widget(Paragraph::new(row).block(rpg_block("", theme)), panel);
+    }
+
+    let keys = Line::from(vec![
+        keycap(" J/K ", theme),
+        Span::styled(" 移动   ", Style::new().fg(theme.fg_dim)),
+        keycap(" Enter ", theme),
+        Span::styled(" 确认   ", Style::new().fg(theme.fg_dim)),
+        keycap(" Q ", theme),
+        Span::styled(" 逃跑", Style::new().fg(theme.fg_dim)),
+    ])
+    .centered();
+    frame.render_widget(
+        Paragraph::new(keys),
+        Rect {
+            x: area.x,
+            y,
+            width: area.width,
+            height: 1,
+        },
+    );
+}
+
+/// 状态窗四行:分支 / HP(工作区改动)/ MP(贮藏)/ EXP(待推送)。
+fn status_rows(vitals: &RepoVitals, inner: usize, theme: &Theme) -> Vec<Line<'static>> {
+    let dim = Style::new().fg(theme.fg_dim);
+    let hp = GAUGE_CELLS - vitals.changes.min(GAUGE_CELLS);
+    let mp = GAUGE_CELLS - vitals.stashes.min(GAUGE_CELLS);
+    let exp = vitals.ahead.unwrap_or(0).min(GAUGE_CELLS);
+    let exp_note = match vitals.ahead {
+        None => "无上游".to_owned(),
+        Some(0) => "已同步".to_owned(),
+        Some(n) => format!("↑{n} 待推送"),
+    };
+    vec![
+        spread_line(
+            vec![
+                Span::styled("分支 ", dim),
+                Span::styled(
+                    vitals.branch.clone(),
+                    Style::new()
+                        .fg(theme.rpg_frame)
+                        .add_modifier(Modifier::BOLD),
+                ),
+            ],
+            vec![Span::styled(
+                format!("Lv.{}", vitals.level),
+                Style::new().fg(theme.rpg_gold),
+            )],
+            inner,
+        ),
+        spread_line(
+            gauge_spans("HP  ", hp, theme.rpg_hp, theme),
+            vec![Span::styled(format!("改动 ×{}", vitals.changes), dim)],
+            inner,
+        ),
+        spread_line(
+            gauge_spans("MP  ", mp, theme.rpg_mp, theme),
+            vec![Span::styled(format!("贮藏 ×{}", vitals.stashes), dim)],
+            inner,
+        ),
+        spread_line(
+            gauge_spans("EXP ", exp, theme.rpg_exp, theme),
+            vec![Span::styled(exp_note, dim)],
+            inner,
+        ),
+    ]
+}
+
+/// 标签 + 十格状态条(已填充格 + 空槽格)。
+fn gauge_spans(
+    label: &str,
+    filled: usize,
+    color: ratatui::style::Color,
+    theme: &Theme,
+) -> Vec<Span<'static>> {
+    vec![
+        Span::styled(label.to_owned(), Style::new().fg(theme.fg_dim)),
+        Span::styled("█".repeat(filled), Style::new().fg(color)),
+        Span::styled(
+            "░".repeat(GAUGE_CELLS - filled),
+            Style::new().fg(theme.rpg_gauge_empty),
+        ),
+    ]
+}
+
+/// 面板内两端对齐的一行:左右两组 spans 之间以空隙撑开。
+fn spread_line(left: Vec<Span<'static>>, right: Vec<Span<'static>>, inner: usize) -> Line<'static> {
+    let used: usize = left
+        .iter()
+        .chain(right.iter())
+        .map(|s| display_width(&s.content))
+        .sum();
+    let mut spans = left;
+    spans.push(Span::raw(" ".repeat(inner.saturating_sub(used).max(1))));
+    spans.extend(right);
+    Line::from(spans)
+}
+
+/// 选中行的光标符号(橙色,闪烁)或等宽占位。
+fn cursor_span(selected: bool, theme: &Theme) -> Span<'static> {
+    if selected {
+        Span::styled(
+            "▶ ",
+            Style::new()
+                .fg(theme.rpg_accent)
+                .add_modifier(Modifier::SLOW_BLINK),
+        )
+    } else {
+        Span::raw("  ")
+    }
+}
+
+/// 条目标签样式:选中为橙色加粗,未选中为常规蓝。
+fn label_style(selected: bool, theme: &Theme) -> Style {
+    if selected {
+        Style::new()
+            .fg(theme.rpg_accent)
+            .add_modifier(Modifier::BOLD)
+    } else {
+        Style::new().fg(theme.blue)
+    }
+}
+
+/// RPG 双线窗框:米白框线 + 嵌在上框线的标题(空标题则纯框)。
+fn rpg_block(title: &str, theme: &Theme) -> Block<'static> {
+    let mut block = Block::bordered()
+        .border_type(BorderType::Double)
+        .border_style(Style::new().fg(theme.rpg_frame))
+        .padding(Padding::new(2, 2, 0, 0));
+    if !title.trim().is_empty() {
+        block = block.title(Span::styled(
+            format!(" ◆ {} ", title.trim()),
+            Style::new()
+                .fg(theme.rpg_frame)
+                .add_modifier(Modifier::BOLD),
+        ));
+    }
+    block
+}
+
+/// `──── ◆ 文案 ◆ ────` 分隔线,两侧线段等分剩余宽度。
+fn divider_line(text: &str, width: u16, theme: &Theme) -> Line<'static> {
+    let tw = display_width(text) + 2;
+    let side = (width as usize).saturating_sub(tw) / 2;
+    Line::from(vec![
+        Span::styled("─".repeat(side), Style::new().fg(theme.fg_dim)),
+        Span::styled(format!(" {text} "), Style::new().fg(theme.hint_fg)),
+        Span::styled(
+            "─".repeat((width as usize).saturating_sub(tw + side)),
+            Style::new().fg(theme.fg_dim),
+        ),
+    ])
+}
+
+/// 键帽样式的按键标签。
+fn keycap(text: &str, theme: &Theme) -> Span<'static> {
+    Span::styled(
+        text.to_owned(),
+        Style::new().fg(theme.keycap_fg).bg(theme.keycap_bg),
+    )
+}
+
+/// 面板右下一格偏移的硬阴影(RPG 窗口立体感);需在面板内容之前绘制。
+fn hard_shadow(frame: &mut Frame, panel: Rect, theme: &Theme) {
+    let shadow = Rect {
+        x: panel.x + 1,
+        y: panel.y + 1,
+        width: panel.width,
+        height: panel.height,
+    }
+    .intersection(frame.area());
+    frame.render_widget(
+        Block::new().style(Style::new().bg(theme.rpg_shadow)),
+        shadow,
+    );
 }
 
 /// 计算面板宽度:按内容自适应;带 logo 的页面加宽到与 logo 齐宽,不超出屏幕。
@@ -364,28 +692,7 @@ fn place_panel(frame: &mut Frame, width: u16, panel_h: u16, logo: bool, theme: &
             width: logo_w,
             height: art.len() as u16,
         };
-        // 无自带颜色的字符统一着主题 logo 色(纯文本字符画场景)
-        let tinted: Vec<Line<'static>> = art
-            .iter()
-            .map(|line| {
-                let spans: Vec<Span<'static>> = line
-                    .spans
-                    .iter()
-                    .map(|s| {
-                        if s.style.fg.is_none()
-                            && s.style.bg.is_none()
-                            && !s.content.trim().is_empty()
-                        {
-                            Span::styled(s.content.clone(), Style::new().fg(theme.logo))
-                        } else {
-                            s.clone()
-                        }
-                    })
-                    .collect();
-                Line::from(spans)
-            })
-            .collect();
-        frame.render_widget(Paragraph::new(tinted), logo_area);
+        frame.render_widget(Paragraph::new(tinted_logo(theme)), logo_area);
     }
     Rect {
         x: area.x + (area.width.saturating_sub(width)) / 2,
@@ -395,8 +702,30 @@ fn place_panel(frame: &mut Frame, width: u16, panel_h: u16, logo: bool, theme: &
     }
 }
 
-/// 绘制「命令执行中」等待页:与主菜单同款的居中圆角面板 + logo,
-/// 命令行高亮展示,页面结构与菜单页一致以减小切换跳变。
+/// logo 的着色副本:无自带颜色的字符统一着主题 logo 色(纯文本字符画场景)。
+fn tinted_logo(theme: &Theme) -> Vec<Line<'static>> {
+    logo_art()
+        .iter()
+        .map(|line| {
+            let spans: Vec<Span<'static>> = line
+                .spans
+                .iter()
+                .map(|s| {
+                    if s.style.fg.is_none() && s.style.bg.is_none() && !s.content.trim().is_empty()
+                    {
+                        Span::styled(s.content.clone(), Style::new().fg(theme.logo))
+                    } else {
+                        s.clone()
+                    }
+                })
+                .collect();
+            Line::from(spans)
+        })
+        .collect()
+}
+
+/// 绘制「命令执行中」等待页:字标 + 双线窗框,命令行高亮展示,
+/// 页面结构与主菜单一致以减小切换跳变。
 fn draw_flash(frame: &mut Frame, cmd_line: &str, theme: &Theme) {
     let area = frame.area();
     if area.width == 0 || area.height == 0 {
@@ -409,21 +738,20 @@ fn draw_flash(frame: &mut Frame, cmd_line: &str, theme: &Theme) {
         true,
         area,
     );
-    let panel = place_panel(frame, width, 5, true, theme);
-    let block = Block::bordered()
-        .border_type(BorderType::Rounded)
-        .border_style(Style::new().fg(theme.border))
-        .padding(Padding::new(2, 2, 1, 1));
+    let panel = place_panel(frame, width, 3, true, theme);
+    hard_shadow(frame, panel, theme);
     let line = Line::from(vec![
         Span::styled(
             cmd_line.to_owned(),
-            Style::new().fg(theme.amber).add_modifier(Modifier::BOLD),
+            Style::new()
+                .fg(theme.rpg_accent)
+                .add_modifier(Modifier::BOLD),
         ),
         Span::styled(suffix, Style::new().fg(theme.fg_dim)),
     ])
     .centered();
     frame.render_widget(Clear, panel);
-    frame.render_widget(Paragraph::new(line).block(block), panel);
+    frame.render_widget(Paragraph::new(line).block(rpg_block("", theme)), panel);
 }
 
 /// 弹框事件循环:绘制一次,等待任意按键关闭。
@@ -443,7 +771,7 @@ fn notice_loop(
     }
 }
 
-/// 绘制居中的消息弹框:琥珀色标题 + 自动换行正文。
+/// 绘制居中的消息弹框:双线窗框 + 琥珀色嵌入标题 + 自动换行正文。
 fn draw_notice(frame: &mut Frame, title: &str, body: &str, theme: &Theme) {
     let area = frame.area();
     let width = 64u16.min(area.width.saturating_sub(4)).max(20);
@@ -462,13 +790,14 @@ fn draw_notice(frame: &mut Frame, title: &str, body: &str, theme: &Theme) {
         width,
         height,
     };
+    hard_shadow(frame, panel, theme);
 
     let block = Block::bordered()
-        .border_type(BorderType::Rounded)
-        .border_style(Style::new().fg(theme.border))
+        .border_type(BorderType::Double)
+        .border_style(Style::new().fg(theme.rpg_frame))
         .padding(Padding::new(2, 2, 1, 1))
         .title(Span::styled(
-            format!(" {} ", title.trim()),
+            format!(" ◆ {} ", title.trim()),
             Style::new().fg(theme.amber).add_modifier(Modifier::BOLD),
         ))
         .title_bottom(
@@ -499,12 +828,38 @@ mod tests {
         assert_eq!(wrap_move(2, 5, 1), 3);
     }
 
-    /// CJK 显示宽度估算(面板宽度自适应用)
+    /// CJK 显示宽度估算(面板宽度自适应用);块元素 / 几何符号按 1 列
     #[test]
     fn display_width_counts_cjk_as_two() {
         assert_eq!(display_width("pull"), 4);
         assert_eq!(display_width("拉取"), 4);
         assert_eq!(display_width("a拉b"), 4);
+        assert_eq!(display_width("████░░"), 6);
+        assert_eq!(display_width("▶ ◆"), 3);
+        assert_eq!(display_width("↑2 待推送"), 9);
+    }
+
+    /// 两端对齐行:空隙撑满内宽,总宽恰为 inner
+    #[test]
+    fn spread_line_fills_inner_width() {
+        let line = spread_line(
+            vec![Span::raw("HP  "), Span::raw("████")],
+            vec![Span::raw("改动 ×2")],
+            30,
+        );
+        let total: usize = line.spans.iter().map(|s| display_width(&s.content)).sum();
+        assert_eq!(total, 30);
+    }
+
+    /// 状态条:填充格与空槽格总和恒为 GAUGE_CELLS
+    #[test]
+    fn gauge_spans_total_cells() {
+        let theme = Theme::default();
+        for filled in [0, 3, GAUGE_CELLS] {
+            let spans = gauge_spans("HP  ", filled, theme.rpg_hp, &theme);
+            let cells: usize = spans[1].content.chars().count() + spans[2].content.chars().count();
+            assert_eq!(cells, GAUGE_CELLS);
+        }
     }
 
     /// ANSI 半块像素画解析:颜色状态机、透明格与尾部空行裁剪
@@ -527,6 +882,74 @@ mod tests {
         let lines = parse_ansi_art("ABC\n\n");
         assert_eq!(lines.len(), 1);
         assert_eq!(lines[0].spans.len(), 3);
+    }
+
+    /// 把 TestBackend 渲染缓冲拼成纯文本(逐行)。
+    fn buffer_text(buf: &ratatui::buffer::Buffer) -> String {
+        let area = buf.area();
+        let mut text = String::new();
+        for y in area.top()..area.bottom() {
+            for x in area.left()..area.right() {
+                text.push_str(buf[(x, y)].symbol());
+            }
+            text.push('\n');
+        }
+        text
+    }
+
+    /// RPG 主菜单在 80×24 终端下渲染出全部区块
+    #[test]
+    fn rpg_menu_renders_all_sections() {
+        use ratatui::{Terminal, backend::TestBackend};
+        let items = vec![
+            MenuItem::new("pull", "拉取远端").with_hint("从远端拉取最新提交,更新当前分支。"),
+            MenuItem::new("merge", "合并分支"),
+        ];
+        let vitals = RepoVitals {
+            branch: "main".to_owned(),
+            changes: 2,
+            stashes: 3,
+            ahead: Some(2),
+            level: 128,
+        };
+        let mut terminal = Terminal::new(TestBackend::new(80, 24)).unwrap();
+        terminal
+            .draw(|f| draw_rpg_menu(f, &items, 0, &vitals, &Theme::default()))
+            .unwrap();
+        let text = buffer_text(terminal.backend().buffer());
+        println!("{text}");
+        // CJK 在缓冲中占两格(续格为空格),匹配前去掉全部空格
+        let flat = text.replace(' ', "");
+        assert!(flat.contains("◆状态"), "状态窗标题缺失");
+        assert!(flat.contains("◆指令"), "指令窗标题缺失");
+        assert!(flat.contains("▶pull"), "选中行光标缺失");
+        assert!(flat.contains("Lv.128"), "等级缺失");
+        assert!(flat.contains("↑2待推送"), "待推送计数缺失");
+        assert!(flat.contains("选择你的指令"), "分隔线文案缺失");
+        assert!(flat.contains("从远端拉取最新提交"), "说明窗文案缺失");
+        assert!(flat.contains("逃跑"), "按键提示缺失");
+    }
+
+    /// 高度不足时按序降级:12 行终端只保留指令窗与按键行
+    #[test]
+    fn rpg_menu_degrades_on_short_terminal() {
+        use ratatui::{Terminal, backend::TestBackend};
+        let items = vec![MenuItem::new("pull", "拉取远端")];
+        let vitals = RepoVitals {
+            branch: "main".to_owned(),
+            changes: 0,
+            stashes: 0,
+            ahead: None,
+            level: 1,
+        };
+        let mut terminal = Terminal::new(TestBackend::new(60, 12)).unwrap();
+        terminal
+            .draw(|f| draw_rpg_menu(f, &items, 0, &vitals, &Theme::default()))
+            .unwrap();
+        let flat = buffer_text(terminal.backend().buffer()).replace(' ', "");
+        assert!(!flat.contains("◆状态"), "矮终端应隐藏状态窗");
+        assert!(flat.contains("◆指令"), "指令窗必须保留");
+        assert!(flat.contains("▶pull"));
     }
 
     /// 内嵌 logo 资产能解析出非空字符画

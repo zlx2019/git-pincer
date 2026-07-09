@@ -42,6 +42,22 @@ pub(crate) struct Theme {
     pub(crate) logo: Color,
     /// 结果栏「待解决」占位文字
     pub(crate) placeholder_fg: Color,
+    /// RPG 菜单:双线窗框与嵌入标题(米白)
+    pub(crate) rpg_frame: Color,
+    /// RPG 菜单:面板硬阴影
+    pub(crate) rpg_shadow: Color,
+    /// RPG 菜单:强调橙(选中行 / 光标符号)
+    pub(crate) rpg_accent: Color,
+    /// RPG 菜单:HP 条(绿)
+    pub(crate) rpg_hp: Color,
+    /// RPG 菜单:MP 条(蓝)
+    pub(crate) rpg_mp: Color,
+    /// RPG 菜单:EXP 条(橙黄)
+    pub(crate) rpg_exp: Color,
+    /// RPG 菜单:状态条空槽
+    pub(crate) rpg_gauge_empty: Color,
+    /// RPG 菜单:等级数字(金)
+    pub(crate) rpg_gold: Color,
     /// 色带背景:修改(普通, 选中)
     band_modified: (Color, Color),
     /// 色带背景:新增(普通, 选中)
@@ -88,6 +104,14 @@ impl Theme {
             hint_fg: term_color(170, 178, 196),
             logo: term_color(255, 118, 48),
             placeholder_fg: term_color(196, 132, 138),
+            rpg_frame: term_color(234, 225, 198),
+            rpg_shadow: term_color(3, 5, 9),
+            rpg_accent: term_color(255, 122, 47),
+            rpg_hp: term_color(126, 224, 138),
+            rpg_mp: term_color(108, 178, 255),
+            rpg_exp: term_color(255, 176, 79),
+            rpg_gauge_empty: term_color(43, 54, 80),
+            rpg_gold: term_color(255, 195, 92),
             band_modified: (term_color(36, 56, 96), term_color(52, 80, 132)),
             band_added: (term_color(26, 42, 31), term_color(40, 66, 48)),
             band_deleted: (term_color(44, 47, 56), term_color(60, 64, 76)),
@@ -117,6 +141,14 @@ impl Theme {
             hint_fg: term_color(71, 85, 105),
             logo: term_color(214, 77, 0),
             placeholder_fg: term_color(158, 70, 76),
+            rpg_frame: term_color(90, 74, 47),
+            rpg_shadow: term_color(206, 200, 184),
+            rpg_accent: term_color(217, 95, 16),
+            rpg_hp: term_color(58, 150, 72),
+            rpg_mp: term_color(36, 110, 196),
+            rpg_exp: term_color(200, 120, 20),
+            rpg_gauge_empty: term_color(216, 210, 194),
+            rpg_gold: term_color(170, 122, 12),
             band_modified: (term_color(219, 233, 249), term_color(196, 219, 244)),
             band_added: (term_color(222, 240, 216), term_color(200, 229, 192)),
             band_deleted: (term_color(229, 231, 236), term_color(212, 215, 223)),
