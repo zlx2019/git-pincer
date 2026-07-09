@@ -31,9 +31,9 @@ pub fn run(verbose: bool, dir: &Path, light: bool) -> Result<()> {
 
 /// 菜单主循环:一级选操作,二级选目标;二级取消回到一级。
 ///
-/// 选择、执行与失败弹框全部在同一个 [`ui::MenuSession`] 内完成
-/// (git 以捕获方式执行,无终端交互),页面切换与失败反馈都不闪屏;
-/// 只有成功或产生冲突才结束会话,回放捕获的 git 输出并接管后续。
+/// 选择、执行与成功 / 失败弹框全部在同一个 [`ui::MenuSession`] 内完成
+/// (git 以捕获方式执行,无终端交互),页面切换与结果反馈都不闪屏;
+/// 只有产生冲突才结束会话,回放捕获的 git 输出并进入解决循环。
 fn menu_loop(git: &Git, light: bool) -> Result<()> {
     let actions: Vec<MenuItem> = [
         ("pull", "拉取远端"),
@@ -48,7 +48,7 @@ fn menu_loop(git: &Git, light: bool) -> Result<()> {
 
     // 一级菜单上次选中的操作,从二级返回时光标停在原处
     let mut last_action = 0usize;
-    let (cmd, outcome) = {
+    let (cmd, out) = {
         let mut session = ui::MenuSession::open(light)?;
         loop {
             let Some(action) = session.pick("", &actions, true, last_action)? else {
@@ -112,36 +112,92 @@ fn menu_loop(git: &Git, light: bool) -> Result<()> {
                     }
                 }
             };
-            // 会话内捕获执行:失败弹框后回到一级菜单,全程不退出 TUI
-            session.flash(&format!("$ git {} 执行中…", cmd.join(" ")))?;
+            // 会话内捕获执行:成功 / 失败都弹框反馈后回到一级菜单,全程不退出 TUI
+            session.flash(&format!("$ git {}", cmd.join(" ")))?;
             let refs: Vec<&str> = cmd.iter().map(String::as_str).collect();
             match run::launch_captured(git, &refs)? {
                 run::LaunchOutcome::Failed(reason) => {
                     session.notice(&format!("git {} 失败", cmd[0]), &reason)?;
                 }
-                outcome => break (cmd, outcome),
+                run::LaunchOutcome::Success(out) => {
+                    let body = compose_notice(
+                        &String::from_utf8_lossy(&out.stdout),
+                        &String::from_utf8_lossy(&out.stderr),
+                    );
+                    session.notice(&format!("git {} 完成", cmd[0]), &body)?;
+                }
+                run::LaunchOutcome::Conflicts(out) => break (cmd, out),
             }
         }
         // session 在此 drop,恢复终端
     };
 
-    // 已回到常规终端:补一行命令历史并回放捕获的 git 输出
+    // 已回到常规终端:补一行命令历史,回放捕获的 git 输出并接管冲突
     println!("[git-pincer] $ git {}", cmd.join(" "));
-    match outcome {
-        run::LaunchOutcome::Success(out) => {
-            replay(&out);
-            Ok(())
-        }
-        run::LaunchOutcome::Conflicts(out) => {
-            replay(&out);
-            resolve_loop(git, light)
-        }
-        run::LaunchOutcome::Failed(_) => unreachable!("失败路径已在会话内处理"),
-    }
+    replay(&out);
+    resolve_loop(git, light)
 }
 
 /// 把捕获的 git 输出原样回放到终端,保留在滚动历史里。
 fn replay(out: &std::process::Output) {
     print!("{}", String::from_utf8_lossy(&out.stdout));
     eprint!("{}", String::from_utf8_lossy(&out.stderr));
+}
+
+/// 成功弹框正文的最大行数,超出时只保留末尾。
+const NOTICE_LINES: usize = 15;
+
+/// 把捕获的 git 输出压缩成弹框正文:顺序合并 stdout / stderr,过长时截去开头。
+fn compose_notice(stdout: &str, stderr: &str) -> String {
+    let mut text = stdout.trim_end().to_owned();
+    let err = stderr.trim_end();
+    if !err.is_empty() {
+        if !text.is_empty() {
+            text.push('\n');
+        }
+        text.push_str(err);
+    }
+    if text.trim().is_empty() {
+        return "(无输出)".to_owned();
+    }
+    let lines: Vec<&str> = text.lines().collect();
+    if lines.len() > NOTICE_LINES {
+        let skipped = lines.len() - NOTICE_LINES;
+        format!("……(已省略前 {skipped} 行)\n{}", lines[skipped..].join("\n"))
+    } else {
+        text
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// 空输出时给出占位提示
+    #[test]
+    fn compose_notice_empty_output() {
+        assert_eq!(compose_notice("", "  \n"), "(无输出)");
+    }
+
+    /// stdout 与 stderr 顺序合并,去掉尾部空白
+    #[test]
+    fn compose_notice_merges_streams() {
+        assert_eq!(
+            compose_notice("Already up to date.\n", "warning: x\n"),
+            "Already up to date.\nwarning: x"
+        );
+    }
+
+    /// 超长输出只保留末尾并标注省略行数
+    #[test]
+    fn compose_notice_truncates_long_output() {
+        let long = (1..=20)
+            .map(|i| format!("line{i}"))
+            .collect::<Vec<_>>()
+            .join("\n");
+        let got = compose_notice(&long, "");
+        assert!(got.starts_with("……(已省略前 5 行)"));
+        assert!(got.ends_with("line20"));
+        assert_eq!(got.lines().count(), NOTICE_LINES + 1);
+    }
 }

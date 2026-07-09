@@ -187,28 +187,13 @@ impl MenuSession {
         notice_loop(&mut self.terminal, title, body, &self.theme)
     }
 
-    /// 绘制一帧居中提示后立即返回(不等待按键),
+    /// 绘制一帧「命令执行中」等待页后立即返回(不等待按键),
     /// 供随后的阻塞操作(如需要网络的 git 命令)期间维持画面反馈。
-    pub(crate) fn flash(&mut self, body: &str) -> Result<()> {
+    pub(crate) fn flash(&mut self, cmd_line: &str) -> Result<()> {
         self.terminal.clear()?;
-        self.terminal.draw(|frame| {
-            let area = frame.area();
-            if area.height == 0 {
-                return;
-            }
-            let line_area = Rect {
-                x: area.x,
-                y: area.y + area.height / 2,
-                width: area.width,
-                height: 1,
-            };
-            frame.render_widget(
-                Paragraph::new(
-                    Line::styled(body.to_owned(), Style::new().fg(self.theme.amber)).centered(),
-                ),
-                line_area,
-            );
-        })?;
+        let theme = &self.theme;
+        self.terminal
+            .draw(|frame| draw_flash(frame, cmd_line, theme))?;
         Ok(())
     }
 }
@@ -275,63 +260,13 @@ fn draw_pick(
         })
         .max()
         .unwrap_or(0);
-    // logo 画在菜单框上方,与菜单成组垂直居中;屏幕放不下时自动隐藏。
-    // 逐行内容左缘对齐(整块统一偏移居中),避免行尾透明格差异造成错位
-    let art = logo_art();
-    let logo_w = art.iter().map(Line::width).max().unwrap_or(0) as u16;
-    let logo_h = art.len() as u16 + 1;
-    // 边框 2 + 左右内边距 4 + 选中符号 2;主菜单加宽到与 logo 齐宽
-    let fit_w = (content_w + 8) as u16;
-    let width = if logo && !art.is_empty() {
-        fit_w.max(logo_w + 2)
-    } else {
-        fit_w.max(36)
-    }
-    .min(area.width.saturating_sub(4));
+    // 边框 2 + 左右内边距 4 + 选中符号 2
+    let width = panel_width(content_w + 8, logo, area);
     // 边框 2 + 上下内边距 2
     let panel_h = (items.len() as u16 + 4)
         .min(area.height.saturating_sub(2))
         .max(5);
-    let show_logo =
-        logo && !art.is_empty() && area.height > panel_h + logo_h + 2 && area.width >= logo_w;
-    let total_h = panel_h + if show_logo { logo_h } else { 0 };
-    let top = area.y + area.height.saturating_sub(total_h) / 2;
-    if show_logo {
-        let logo_area = Rect {
-            x: area.x + area.width.saturating_sub(logo_w) / 2,
-            y: top,
-            width: logo_w,
-            height: art.len() as u16,
-        };
-        // 无自带颜色的字符统一着主题 logo 色(纯文本字符画场景)
-        let tinted: Vec<Line<'static>> = art
-            .iter()
-            .map(|line| {
-                let spans: Vec<Span<'static>> = line
-                    .spans
-                    .iter()
-                    .map(|s| {
-                        if s.style.fg.is_none()
-                            && s.style.bg.is_none()
-                            && !s.content.trim().is_empty()
-                        {
-                            Span::styled(s.content.clone(), Style::new().fg(theme.logo))
-                        } else {
-                            s.clone()
-                        }
-                    })
-                    .collect();
-                Line::from(spans)
-            })
-            .collect();
-        frame.render_widget(Paragraph::new(tinted), logo_area);
-    }
-    let panel = Rect {
-        x: area.x + (area.width.saturating_sub(width)) / 2,
-        y: top + if show_logo { logo_h } else { 0 },
-        width: width.min(area.width),
-        height: panel_h,
-    };
+    let panel = place_panel(frame, width, panel_h, logo, theme);
 
     let mut block = Block::bordered()
         .border_type(BorderType::Rounded)
@@ -395,6 +330,100 @@ fn draw_pick(
 
     frame.render_widget(Clear, panel);
     frame.render_stateful_widget(list, panel, list_state);
+}
+
+/// 计算面板宽度:按内容自适应;带 logo 的页面加宽到与 logo 齐宽,不超出屏幕。
+fn panel_width(content_w: usize, logo: bool, area: Rect) -> u16 {
+    let art_w = logo_art().iter().map(Line::width).max().unwrap_or(0) as u16;
+    let fit = content_w as u16;
+    if logo && art_w > 0 {
+        fit.max(art_w + 2)
+    } else {
+        fit.max(36)
+    }
+    .min(area.width.saturating_sub(4))
+}
+
+/// 垂直居中放置「logo + 面板」组合并绘制 logo,返回面板区域。
+///
+/// logo 画在面板上方,两者作为整体居中;屏幕放不下时自动隐藏 logo。
+/// 逐行内容左缘对齐(整块统一偏移居中),避免行尾透明格差异造成错位。
+fn place_panel(frame: &mut Frame, width: u16, panel_h: u16, logo: bool, theme: &Theme) -> Rect {
+    let area = frame.area();
+    let art = logo_art();
+    let logo_w = art.iter().map(Line::width).max().unwrap_or(0) as u16;
+    let logo_h = art.len() as u16 + 1;
+    let show_logo =
+        logo && !art.is_empty() && area.height > panel_h + logo_h + 2 && area.width >= logo_w;
+    let total_h = panel_h + if show_logo { logo_h } else { 0 };
+    let top = area.y + area.height.saturating_sub(total_h) / 2;
+    if show_logo {
+        let logo_area = Rect {
+            x: area.x + area.width.saturating_sub(logo_w) / 2,
+            y: top,
+            width: logo_w,
+            height: art.len() as u16,
+        };
+        // 无自带颜色的字符统一着主题 logo 色(纯文本字符画场景)
+        let tinted: Vec<Line<'static>> = art
+            .iter()
+            .map(|line| {
+                let spans: Vec<Span<'static>> = line
+                    .spans
+                    .iter()
+                    .map(|s| {
+                        if s.style.fg.is_none()
+                            && s.style.bg.is_none()
+                            && !s.content.trim().is_empty()
+                        {
+                            Span::styled(s.content.clone(), Style::new().fg(theme.logo))
+                        } else {
+                            s.clone()
+                        }
+                    })
+                    .collect();
+                Line::from(spans)
+            })
+            .collect();
+        frame.render_widget(Paragraph::new(tinted), logo_area);
+    }
+    Rect {
+        x: area.x + (area.width.saturating_sub(width)) / 2,
+        y: top + if show_logo { logo_h } else { 0 },
+        width: width.min(area.width),
+        height: panel_h,
+    }
+}
+
+/// 绘制「命令执行中」等待页:与主菜单同款的居中圆角面板 + logo,
+/// 命令行高亮展示,页面结构与菜单页一致以减小切换跳变。
+fn draw_flash(frame: &mut Frame, cmd_line: &str, theme: &Theme) {
+    let area = frame.area();
+    if area.width == 0 || area.height == 0 {
+        return;
+    }
+    let suffix = "  执行中…";
+    // 边框 2 + 左右内边距 4 + 两端余量 2
+    let width = panel_width(
+        display_width(cmd_line) + display_width(suffix) + 8,
+        true,
+        area,
+    );
+    let panel = place_panel(frame, width, 5, true, theme);
+    let block = Block::bordered()
+        .border_type(BorderType::Rounded)
+        .border_style(Style::new().fg(theme.border))
+        .padding(Padding::new(2, 2, 1, 1));
+    let line = Line::from(vec![
+        Span::styled(
+            cmd_line.to_owned(),
+            Style::new().fg(theme.amber).add_modifier(Modifier::BOLD),
+        ),
+        Span::styled(suffix, Style::new().fg(theme.fg_dim)),
+    ])
+    .centered();
+    frame.render_widget(Clear, panel);
+    frame.render_widget(Paragraph::new(line).block(block), panel);
 }
 
 /// 弹框事件循环:绘制一次,等待任意按键关闭。
