@@ -3,7 +3,7 @@
 All notable changes to this project will be documented in this file. See [conventional commits](https://www.conventionalcommits.org/) for commit guidelines.
 
 ---
-## [unreleased]
+## [0.1.2](https://github.com/zlx2019/git-pincer/compare/v0.1.1..v0.1.2) - 2026-07-10
 
 ### Bug Fixes
 
@@ -12,11 +12,21 @@ All notable changes to this project will be documented in this file. See [conven
 - **(ui)** cross-platform clipboard, editor fallback and Ctrl+C - ([2075136](https://github.com/zlx2019/git-pincer/commit/20751361f8ef0ecacb535b4fcb9daaf6b857b07e)) - Zero
 - **(ui)** respect $VISUAL before $EDITOR when picking the editor - ([c8e8627](https://github.com/zlx2019/git-pincer/commit/c8e862721b9ad0067a3491ce1c16f7bb7a2c1aaf)) - Zero
 
+### Documentation
+
+- note the one-time shell hook for tab completion - ([a47a7c9](https://github.com/zlx2019/git-pincer/commit/a47a7c93dcde82eb3df99df8c735369a9dfa5b12)) - Zero
+- split completion setup into per-shell commands - ([572873e](https://github.com/zlx2019/git-pincer/commit/572873e3027fa1236d27f03d9ad09bc94a007c9c)) - Zero
+
 ### Features
 
+- **(cli)** completions subcommand for shell completion scripts - ([bb133a3](https://github.com/zlx2019/git-pincer/commit/bb133a316cf8d18d3ed4f3f2d91e575f5a05610c)) - Zero
 - **(config)** user config file for theme, key bindings and option defaults - ([ea30a5e](https://github.com/zlx2019/git-pincer/commit/ea30a5efd15d94902c2bb99a1d7af466e4ff510f)) - Zero
 - **(config)** configurable editor with full fallback chain - ([7d5e8d6](https://github.com/zlx2019/git-pincer/commit/7d5e8d65294071725592780c54f98cb8a5208e47)) - Zero
 - **(ui)** free viewport scrolling with Ctrl+d / Ctrl+u - ([da45bdd](https://github.com/zlx2019/git-pincer/commit/da45bdd630b7e6b609e73346d0cf056329c85ef5)) - Zero
+
+### Miscellaneous Chores
+
+- **(meta)** crates.io categories, version badge, changelog and API note - ([bcc4ad5](https://github.com/zlx2019/git-pincer/commit/bcc4ad58dd6d2397a254b3766d91590d42fd74b8)) - Zero
 
 ### Other
 
@@ -39,6 +49,12 @@ feat: configurable editor with full fallback chain - ([5db7b18](https://github.c
 - Merge pull request #8 from zlx2019/feat/scroll
 
 feat: free viewport scrolling with Ctrl+d / Ctrl+u - ([bf909e5](https://github.com/zlx2019/git-pincer/commit/bf909e50bb583a639103c2e42e8080f4902e6f31)) - Zero
+- Merge pull request #9 from zlx2019/chore/polish
+
+chore: release polish — shell completions, categories, badge, changelog - ([5954946](https://github.com/zlx2019/git-pincer/commit/5954946ce6f1dbf7c77cd0212bd6dbc0c7b6e68f)) - Zero
+- Merge pull request #10 from zlx2019/chore/polish
+
+docs: split completion setup into per-shell commands - ([9b4c67f](https://github.com/zlx2019/git-pincer/commit/9b4c67f4a11e5d0cb5b75119b862a7c425b1be28)) - Zero
 
 ### Performance
 
