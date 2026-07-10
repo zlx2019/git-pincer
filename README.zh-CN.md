@@ -5,6 +5,7 @@
 # git-pincer
 
 [![CI](https://github.com/zlx2019/git-pincer/actions/workflows/ci.yml/badge.svg)](https://github.com/zlx2019/git-pincer/actions/workflows/ci.yml)
+[![crates.io](https://img.shields.io/crates/v/git-pincer.svg)](https://crates.io/crates/git-pincer)
 [![License: MIT](https://img.shields.io/badge/license-MIT-blue.svg)](./LICENSE)
 [![Rust](https://img.shields.io/badge/rust-1.96.0%2B-orange.svg)](https://www.rust-lang.org)
 

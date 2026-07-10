@@ -4,12 +4,13 @@ version = "0.1.1"
 edition = "2024"
 rust-version = "1.96.0"
 authors = ["Zero <zero9501@outlook.com>"]
-description = "A simple and compact Git CLI, mainly used for resolving conflicts."
+description = "A simple and efficient terminal Git conflict resolution CLI tool."
 documentation = "https://docs.rs/git-pincer"
 repository = "https://github.com/zlx2019/git-pincer"
 readme = "README.md"
 license = "MIT"
 keywords = ["git", "git-cli", "tui"]
+categories = ["command-line-utilities", "development-tools"]
 include = ["/src", "/locales", "/Cargo.toml", "/README.md", "/LICENSE"]
 
 [dependencies]
