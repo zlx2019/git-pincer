@@ -215,21 +215,52 @@ pub(crate) struct FileHighlight {
 
 impl FileHighlight {
     /// 构建文件的完整高亮信息。
+    ///
+    /// 三栏 syntect 高亮互相独立且都是纯 CPU 计算(实测 ~62µs/行),
+    /// 用作用域线程并行构建,把大文件首帧的等待压到最慢一栏;
+    /// 词级强调留在当前线程,与三栏计算重叠。
     fn build(merge: &FileMerge, rev: u64, light: bool) -> Self {
-        let emphasis = merge.chunks.iter().map(chunk_emphasis).collect();
         let syntax = find_syntax(merge);
-        let highlight = |lines: &mut dyn Iterator<Item = &String>| {
-            syntax.map(|s| highlight_pane(lines, s, light))
-        };
+        let (emphasis, ours, theirs, result) = std::thread::scope(|scope| {
+            let ours = scope.spawn(|| {
+                syntax.map(|s| {
+                    highlight_pane(
+                        &mut merge.chunks.iter().flat_map(|c| c.ours_lines().iter()),
+                        s,
+                        light,
+                    )
+                })
+            });
+            let theirs = scope.spawn(|| {
+                syntax.map(|s| {
+                    highlight_pane(
+                        &mut merge.chunks.iter().flat_map(|c| c.theirs_lines().iter()),
+                        s,
+                        light,
+                    )
+                })
+            });
+            let result = scope.spawn(|| {
+                syntax.map(|s| {
+                    let mut result = ResultSyntax::default();
+                    result.update(merge, s, light);
+                    result
+                })
+            });
+            let emphasis: Vec<ChunkEmphasis> = merge.chunks.iter().map(chunk_emphasis).collect();
+            // 计算闭包不会 panic;万一发生则优雅降级为无语法高亮
+            (
+                emphasis,
+                ours.join().unwrap_or_default(),
+                theirs.join().unwrap_or_default(),
+                result.join().unwrap_or_default(),
+            )
+        });
         Self {
             emphasis,
-            ours: highlight(&mut merge.chunks.iter().flat_map(|c| c.ours_lines().iter())),
-            theirs: highlight(&mut merge.chunks.iter().flat_map(|c| c.theirs_lines().iter())),
-            result: syntax.map(|s| {
-                let mut result = ResultSyntax::default();
-                result.update(merge, s, light);
-                result
-            }),
+            ours,
+            theirs,
+            result,
             syntax,
             light,
             result_rev: rev,
