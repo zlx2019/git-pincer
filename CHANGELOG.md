@@ -3,6 +3,28 @@
 All notable changes to this project will be documented in this file. See [conventional commits](https://www.conventionalcommits.org/) for commit guidelines.
 
 ---
+## [0.1.3](https://github.com/zlx2019/git-pincer/compare/v0.1.2..v0.1.3) - 2026-07-10
+
+### Documentation
+
+- regenerate changelog with the 0.1.2 section - ([60d965f](https://github.com/zlx2019/git-pincer/commit/60d965f2a62147838bbe167e7fbb383da2b6aae5)) - Zero
+- add npm installation instructions - ([55f923b](https://github.com/zlx2019/git-pincer/commit/55f923b2efe39d8de010ce7220c46edff7ecdd01)) - Zero
+
+### Features
+
+- publish npm packages (main + platform binaries) on release - ([e358183](https://github.com/zlx2019/git-pincer/commit/e358183f82b5517d761ae1de188a6c8475d3cb96)) - Zero
+
+### Other
+
+- Merge pull request #11 from zlx2019/feat/npm-publish
+
+feat: publish npm packages on release - ([2ead1ad](https://github.com/zlx2019/git-pincer/commit/2ead1ade393747faca4ea5477a08bcea58cb0779)) - Zero
+
+### Refactoring
+
+- **(ci)** drop workflow_dispatch backfill path from npm publishing - ([e4c7efe](https://github.com/zlx2019/git-pincer/commit/e4c7efedd6ec11aac14b26fa01d69e42bf0910a8)) - Zero
+
+---
 ## [0.1.2](https://github.com/zlx2019/git-pincer/compare/v0.1.1..v0.1.2) - 2026-07-10
 
 ### Bug Fixes
