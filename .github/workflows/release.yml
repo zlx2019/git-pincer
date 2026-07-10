@@ -3,6 +3,7 @@ name: Release
 #   - 生成 changelog
 #   - 创建 github Release（并附加多平台构建产物）
 #   - 发布 crate.io
+#   - 发布 npm（主包 + 各平台二进制子包）
 on:
   push:
     tags:
@@ -105,3 +106,33 @@ jobs:
         run: cargo publish --locked
         env:
           CARGO_REGISTRY_TOKEN: ${{ secrets.CARGO_REGISTRY_TOKEN }}
+
+  publish-npm:
+    name: Publish to npm
+    needs: build
+    if: ${{ !contains(github.ref_name, '-') }}
+    runs-on: ubuntu-latest
+    env:
+      TAG: ${{ github.ref_name }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          registry-url: "https://registry.npmjs.org"
+      - name: Download release assets
+        run: gh release download "$TAG" --pattern "*.tar.gz" --pattern "*.zip" --dir /tmp/assets
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+      # 从 release 压缩包组装出 6 个平台子包 + 1 个主包
+      - name: Assemble npm packages
+        run: node npm/build.mjs "$TAG" /tmp/assets
+      # 先发平台子包, 主包最后发, 避免出现主包可装而子包缺失的窗口期
+      - name: Publish packages
+        run: |
+          for pkg in npm/dist/@zero9501/*; do
+            npm publish "$pkg" --access public
+          done
+          npm publish npm/dist/git-pincer --access public
+        env:
+          NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}

@@ -1,0 +1,37 @@
+{
+  "name": "git-pincer",
+  "version": "0.0.0",
+  "description": "A simple and efficient terminal Git conflict resolution CLI tool.",
+  "keywords": [
+    "git",
+    "merge",
+    "conflict",
+    "diff3",
+    "tui",
+    "cli"
+  ],
+  "homepage": "https://github.com/zlx2019/git-pincer",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/zlx2019/git-pincer.git"
+  },
+  "license": "MIT",
+  "author": "Zero <1143967454@qq.com>",
+  "bin": {
+    "git-pincer": "bin/git-pincer.js"
+  },
+  "files": [
+    "bin"
+  ],
+  "engines": {
+    "node": ">=16"
+  },
+  "optionalDependencies": {
+    "@zero9501/git-pincer-darwin-arm64": "0.0.0",
+    "@zero9501/git-pincer-darwin-x64": "0.0.0",
+    "@zero9501/git-pincer-linux-arm64-gnu": "0.0.0",
+    "@zero9501/git-pincer-linux-x64-gnu": "0.0.0",
+    "@zero9501/git-pincer-linux-x64-musl": "0.0.0",
+    "@zero9501/git-pincer-win32-x64": "0.0.0"
+  }
+}
