@@ -36,9 +36,9 @@ fn change_type(chunk: &MergeChunk) -> ChangeType {
     match chunk.kind {
         ChunkKind::Stable => ChangeType::None,
         ChunkKind::Conflict => ChangeType::Conflict,
-        ChunkKind::Ours => of(&chunk.ours),
-        ChunkKind::Theirs => of(&chunk.theirs),
-        ChunkKind::Agree => of(&chunk.ours),
+        ChunkKind::Ours => of(chunk.ours_lines()),
+        ChunkKind::Theirs => of(chunk.theirs_lines()),
+        ChunkKind::Agree => of(chunk.ours_lines()),
     }
 }
 
@@ -147,10 +147,10 @@ pub(crate) fn build_rows(merge: &FileMerge, folded: bool) -> (Vec<Row>, Vec<usiz
         };
 
         let height = chunk
-            .ours
+            .ours_lines()
             .len()
             .max(result_lines.len())
-            .max(chunk.theirs.len())
+            .max(chunk.theirs_lines().len())
             .max(1);
         // 未解决的冲突块:结果栏不展示 base,改为居中一行「待解决」占位
         let placeholder_at = (chunk.kind == ChunkKind::Conflict && !resolved).then_some(height / 2);
@@ -173,13 +173,13 @@ pub(crate) fn build_rows(merge: &FileMerge, folded: bool) -> (Vec<Row>, Vec<usiz
                     fold: None,
                     ours_state,
                     theirs_state,
-                    ours: cell(&chunk.ours, chunk.ours_start),
+                    ours: cell(chunk.ours_lines(), chunk.ours_start),
                     result: match placeholder_at {
                         Some(at) if i == at => Cell::Placeholder,
                         Some(_) => Cell::Empty,
                         None => cell(&result_lines, result_no),
                     },
-                    theirs: cell(&chunk.theirs, chunk.theirs_start),
+                    theirs: cell(chunk.theirs_lines(), chunk.theirs_start),
                 });
             }
         };

@@ -6,8 +6,8 @@
 //! 此时退化为 ours ↔ theirs 互比,两栏各自高亮「与对侧不同的词」。
 //!
 //! 语法高亮按文件计算一次而非逐帧:ours / theirs 栏内容不可变,构建后终身有效;
-//! result 栏随取用变化,以 `revision` 判定失效并整栏重算(syntect 的解析状态
-//! 跨行传递,无法按块独立重算)。只取 syntect 的前景色,背景让位给色带。
+//! result 栏随取用变化,以 `revision` 判定失效并按块增量重算(块边界缓存
+//! syntect 解析状态,见 [`ResultSyntax`])。只取 syntect 的前景色,背景让位给色带。
 
 use std::collections::HashMap;
 use std::ops::Range;
@@ -223,8 +223,8 @@ impl FileHighlight {
         };
         Self {
             emphasis,
-            ours: highlight(&mut merge.chunks.iter().flat_map(|c| c.ours.iter())),
-            theirs: highlight(&mut merge.chunks.iter().flat_map(|c| c.theirs.iter())),
+            ours: highlight(&mut merge.chunks.iter().flat_map(|c| c.ours_lines().iter())),
+            theirs: highlight(&mut merge.chunks.iter().flat_map(|c| c.theirs_lines().iter())),
             result: syntax.map(|s| {
                 let mut result = ResultSyntax::default();
                 result.update(merge, s, light);
@@ -383,7 +383,7 @@ fn find_syntax(merge: &FileMerge) -> Option<&'static SyntaxReference> {
     let total: usize = merge
         .chunks
         .iter()
-        .map(|c| c.ours.len() + c.theirs.len() + c.base.len())
+        .map(|c| c.ours_lines().len() + c.theirs_lines().len() + c.base.len())
         .sum();
     if total > SYNTAX_MAX_LINES {
         return None;
@@ -447,12 +447,12 @@ fn line_spans(
 /// 计算一个块的词级强调;稳定块与超大块返回全空。
 fn chunk_emphasis(chunk: &MergeChunk) -> ChunkEmphasis {
     let mut out = ChunkEmphasis {
-        ours: vec![Emphasis::new(); chunk.ours.len()],
-        theirs: vec![Emphasis::new(); chunk.theirs.len()],
+        ours: vec![Emphasis::new(); chunk.ours_lines().len()],
+        theirs: vec![Emphasis::new(); chunk.theirs_lines().len()],
     };
     let oversized = chunk.base.len() > EMPH_MAX_LINES
-        || chunk.ours.len() > EMPH_MAX_LINES
-        || chunk.theirs.len() > EMPH_MAX_LINES;
+        || chunk.ours_lines().len() > EMPH_MAX_LINES
+        || chunk.theirs_lines().len() > EMPH_MAX_LINES;
     if chunk.kind == ChunkKind::Stable || oversized {
         return out;
     }
@@ -468,13 +468,13 @@ fn chunk_emphasis(chunk: &MergeChunk) -> ChunkEmphasis {
         chunk.kind,
         ChunkKind::Ours | ChunkKind::Agree | ChunkKind::Conflict
     ) {
-        side_emphasis(&chunk.base, &chunk.ours, &mut out.ours);
+        side_emphasis(&chunk.base, chunk.ours_lines(), &mut out.ours);
     }
     if matches!(
         chunk.kind,
         ChunkKind::Theirs | ChunkKind::Agree | ChunkKind::Conflict
     ) {
-        side_emphasis(&chunk.base, &chunk.theirs, &mut out.theirs);
+        side_emphasis(&chunk.base, chunk.theirs_lines(), &mut out.theirs);
     }
     out
 }
@@ -496,12 +496,12 @@ fn side_emphasis(base: &[String], side: &[String], out: &mut [Emphasis]) {
 
 /// 冲突块 base 为空时的退化:ours ↔ theirs 互比,两侧各自记录差异区间。
 fn cross_emphasis(chunk: &MergeChunk, out: &mut ChunkEmphasis) {
-    for op in capture_diff_slices(Algorithm::Myers, &chunk.ours, &chunk.theirs) {
+    for op in capture_diff_slices(Algorithm::Myers, chunk.ours_lines(), chunk.theirs_lines()) {
         if op.tag() != DiffTag::Replace {
             continue;
         }
         for (o, t) in op.old_range().zip(op.new_range()) {
-            let (ours_line, theirs_line) = (&chunk.ours[o], &chunk.theirs[t]);
+            let (ours_line, theirs_line) = (&chunk.ours_lines()[o], &chunk.theirs_lines()[t]);
             if let Some(slot) = out.ours.get_mut(o) {
                 *slot = line_emphasis(theirs_line, ours_line);
             }

@@ -41,9 +41,11 @@ pub struct MergeChunk {
     pub kind: ChunkKind,
     /// base 在该区间的行内容(已去行尾换行)
     pub base: Vec<String>,
-    /// 本地侧在该区间的行内容(未改动时与 base 相同)
+    /// 本地侧在该区间的行内容;稳定块不重复存储(为空),
+    /// 读取应使用 [`Self::ours_lines`]
     pub ours: Vec<String>,
-    /// 远端侧在该区间的行内容(未改动时与 base 相同)
+    /// 远端侧在该区间的行内容;稳定块不重复存储(为空),
+    /// 读取应使用 [`Self::theirs_lines`]
     pub theirs: Vec<String>,
     /// base 侧起始行号(1-based)
     pub base_start: usize,
@@ -51,6 +53,27 @@ pub struct MergeChunk {
     pub ours_start: usize,
     /// 远端侧起始行号(1-based)
     pub theirs_start: usize,
+}
+
+impl MergeChunk {
+    /// 本地侧行内容;稳定块双方与 base 一致,共用 base 的存储
+    /// (避免整个文件的稳定区内容被复制三份)。
+    pub fn ours_lines(&self) -> &[String] {
+        if self.kind == ChunkKind::Stable {
+            &self.base
+        } else {
+            &self.ours
+        }
+    }
+
+    /// 远端侧行内容;稳定块双方与 base 一致,共用 base 的存储。
+    pub fn theirs_lines(&self) -> &[String] {
+        if self.kind == ChunkKind::Stable {
+            &self.base
+        } else {
+            &self.theirs
+        }
+    }
 }
 
 /// 三方合并的完整结果:按文件顺序排列的块 + 统计信息。
@@ -224,7 +247,7 @@ fn build_chunks(base_lines: &[String], groups: Vec<Vec<SidedHunk>>) -> MergeResu
     let mut ours_no = 1usize;
     let mut theirs_no = 1usize;
 
-    // 追加一个稳定块(双方内容与 base 一致)
+    // 追加一个稳定块;双方内容与 base 一致,只存 base 一份
     let push_stable = |chunks: &mut Vec<MergeChunk>,
                        lines: &[String],
                        base_no: &mut usize,
@@ -234,8 +257,8 @@ fn build_chunks(base_lines: &[String], groups: Vec<Vec<SidedHunk>>) -> MergeResu
             id: chunks.len(),
             kind: ChunkKind::Stable,
             base: lines.to_vec(),
-            ours: lines.to_vec(),
-            theirs: lines.to_vec(),
+            ours: Vec::new(),
+            theirs: Vec::new(),
             base_start: *base_no,
             ours_start: *ours_no,
             theirs_start: *theirs_no,
@@ -287,19 +310,20 @@ fn build_chunks(base_lines: &[String], groups: Vec<Vec<SidedHunk>>) -> MergeResu
             ChunkKind::Stable => {}
         }
 
+        let (ours_len, theirs_len) = (ours_lines.len(), theirs_lines.len());
         chunks.push(MergeChunk {
             id: chunks.len(),
             kind,
             base: base_lines[lo..hi].to_vec(),
-            ours: ours_lines.clone(),
-            theirs: theirs_lines.clone(),
+            ours: ours_lines,
+            theirs: theirs_lines,
             base_start: base_no,
             ours_start: ours_no,
             theirs_start: theirs_no,
         });
         base_no += hi - lo;
-        ours_no += ours_lines.len();
-        theirs_no += theirs_lines.len();
+        ours_no += ours_len;
+        theirs_no += theirs_len;
         base_pos = hi;
     }
 
@@ -372,7 +396,7 @@ pub fn parse_conflict_file(text: &str) -> Result<MergeResult, ConflictParseError
     let mut section = Section::Common;
     let mut conflict_start = 0usize;
 
-    // 把缓冲的公共段落收为一个稳定块
+    // 把缓冲的公共段落收为一个稳定块(只存 base 一份)
     let flush_common = |chunks: &mut Vec<MergeChunk>,
                         common: &mut Vec<String>,
                         base_no: &mut usize,
@@ -382,19 +406,20 @@ pub fn parse_conflict_file(text: &str) -> Result<MergeResult, ConflictParseError
             return;
         }
         let lines = std::mem::take(common);
+        let len = lines.len();
         chunks.push(MergeChunk {
             id: chunks.len(),
             kind: ChunkKind::Stable,
-            base: lines.clone(),
-            ours: lines.clone(),
-            theirs: lines.clone(),
+            base: lines,
+            ours: Vec::new(),
+            theirs: Vec::new(),
             base_start: *base_no,
             ours_start: *ours_no,
             theirs_start: *theirs_no,
         });
-        *base_no += lines.len();
-        *ours_no += lines.len();
-        *theirs_no += lines.len();
+        *base_no += len;
+        *ours_no += len;
+        *theirs_no += len;
     };
 
     for (idx, raw) in text.lines().enumerate() {
@@ -439,19 +464,20 @@ pub fn parse_conflict_file(text: &str) -> Result<MergeResult, ConflictParseError
                 std::mem::take(&mut ours),
                 std::mem::take(&mut theirs),
             );
+            let lens = (base_lines.len(), ours_lines.len(), theirs_lines.len());
             chunks.push(MergeChunk {
                 id: chunks.len(),
                 kind: ChunkKind::Conflict,
                 base_start: base_no,
                 ours_start: ours_no,
                 theirs_start: theirs_no,
-                base: base_lines.clone(),
-                ours: ours_lines.clone(),
-                theirs: theirs_lines.clone(),
+                base: base_lines,
+                ours: ours_lines,
+                theirs: theirs_lines,
             });
-            base_no += base_lines.len();
-            ours_no += ours_lines.len();
-            theirs_no += theirs_lines.len();
+            base_no += lens.0;
+            ours_no += lens.1;
+            theirs_no += lens.2;
             conflicts += 1;
             section = Section::Common;
         } else {

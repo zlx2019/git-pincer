@@ -219,12 +219,12 @@ fn handle_file_key(session: &mut Session, code: KeyCode, ui: &mut UiState) -> bo
                 false
             }
             KeyCode::Char('H') => {
-                let lines = merge.chunks[merge.cursor].ours.clone();
+                let lines = merge.chunks[merge.cursor].ours_lines().to_vec();
                 ui.message = copy_feedback(&lines, tr("ui.copy_local"));
                 false
             }
             KeyCode::Char('L') => {
-                let lines = merge.chunks[merge.cursor].theirs.clone();
+                let lines = merge.chunks[merge.cursor].theirs_lines().to_vec();
                 ui.message = copy_feedback(&lines, tr("ui.copy_remote"));
                 false
             }
