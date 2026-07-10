@@ -32,7 +32,8 @@ pub fn draw(frame: &mut Frame, session: &mut Session, ui: &mut UiState) {
     match session.current_file_mut() {
         FileEntry::Text(merge) => {
             let highlight = ui.cache.get(file_idx, merge, ui.revision, ui.theme.light);
-            draw_columns(frame, body, merge, folded, &ui.theme, highlight);
+            let rows = ui.rows.get(file_idx, merge, ui.revision, folded);
+            draw_columns(frame, body, merge, &ui.theme, highlight, rows);
         }
         FileEntry::Binary {
             path,

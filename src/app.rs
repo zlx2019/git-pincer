@@ -176,8 +176,8 @@ impl FileMerge {
             .order
             .iter()
             .flat_map(|side| match side {
-                Side::Ours => chunk.ours.clone(),
-                Side::Theirs => chunk.theirs.clone(),
+                Side::Ours => chunk.ours_lines().to_vec(),
+                Side::Theirs => chunk.theirs_lines().to_vec(),
             })
             .collect()
     }

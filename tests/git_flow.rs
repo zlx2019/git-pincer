@@ -117,7 +117,7 @@ fn detects_merge_state_and_conflicts() {
     let files = git.conflicted_files().unwrap();
     assert_eq!(files.len(), 1);
     assert_eq!(files[0].path, "config.toml");
-    assert!(files[0].has_base && files[0].has_ours && files[0].has_theirs);
+    assert!(files[0].base.is_some() && files[0].ours.is_some() && files[0].theirs.is_some());
 }
 
 #[test]
@@ -131,6 +131,19 @@ fn reads_three_stages() {
     assert!(base.contains("127.0.0.1"));
     assert!(ours.contains("192.168.1.1")); // 当前分支 main = ours
     assert!(theirs.contains("10.0.0.1")); // 被合并的 feature = theirs
+
+    // cat-file --batch 批量读取与逐 stage git show 的结果一致
+    let files = git.conflicted_files().unwrap();
+    let f = &files[0];
+    let oids: Vec<&str> = [&f.base, &f.ours, &f.theirs]
+        .into_iter()
+        .filter_map(|o| o.as_deref())
+        .collect();
+    let blobs = git.read_blobs(&oids).unwrap();
+    assert_eq!(blobs.len(), 3);
+    assert_eq!(String::from_utf8(blobs[0].clone()).unwrap(), base);
+    assert_eq!(String::from_utf8(blobs[1].clone()).unwrap(), ours);
+    assert_eq!(String::from_utf8(blobs[2].clone()).unwrap(), theirs);
 }
 
 #[test]

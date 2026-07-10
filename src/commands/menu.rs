@@ -9,11 +9,16 @@ use crate::git::{Git, RepoState};
 use crate::i18n::{tr, tr_f};
 use crate::ui::{self, MenuItem};
 
-use super::resolve::resolve_loop;
+use super::resolve::{resolve_from_menu, resolve_loop};
 use super::run;
 
 /// 提交选择器最多展示的提交数。
 const COMMIT_LIMIT: usize = 50;
+
+/// 「执行中」等待页的延迟阈值:命令超过该时长仍未结束才切换等待页。
+/// 本地快命令(merge / revert 等)直接出结果,避免等待页一闪而过;
+/// 慢命令(如需要网络的 pull)照常获得执行反馈。
+const FLASH_DELAY: std::time::Duration = std::time::Duration::from_millis(150);
 
 /// 运行裸命令入口:接管现场或进入菜单。
 pub fn run(verbose: bool, dir: &Path, light: bool) -> Result<()> {
@@ -34,7 +39,8 @@ pub fn run(verbose: bool, dir: &Path, light: bool) -> Result<()> {
 ///
 /// 选择、执行与成功 / 失败弹框全部在同一个 [`ui::MenuSession`] 内完成
 /// (git 以捕获方式执行,无终端交互),页面切换与结果反馈都不闪屏;
-/// 只有产生冲突才结束会话,回放捕获的 git 输出并进入解决循环。
+/// 产生冲突时把终端所有权移交给解决界面,全程不退出 alternate screen,
+/// 捕获的 git 输出在首个解决会话结束后补进滚动历史。
 fn menu_loop(git: &Git, light: bool) -> Result<()> {
     let actions: Vec<MenuItem> = [
         ("pull", tr("menu.pull_desc"), tr("menu.pull_hint")),
@@ -53,7 +59,7 @@ fn menu_loop(git: &Git, light: bool) -> Result<()> {
 
     // 一级菜单上次选中的操作,从二级返回时光标停在原处
     let mut last_action = 0usize;
-    let (cmd, out) = {
+    let (cmd, out, terminal) = {
         let mut session = ui::MenuSession::open(light)?;
         loop {
             // 每轮重新探测仓库体征,保证执行过命令后状态窗数据仍然准确
@@ -119,10 +125,26 @@ fn menu_loop(git: &Git, light: bool) -> Result<()> {
                     }
                 }
             };
-            // 会话内捕获执行:成功 / 失败都弹框反馈后回到一级菜单,全程不退出 TUI
-            session.flash(&format!("$ git {}", cmd.join(" ")))?;
-            let refs: Vec<&str> = cmd.iter().map(String::as_str).collect();
-            match run::launch_captured(git, &refs)? {
+            // 会话内捕获执行:成功 / 失败都弹框反馈后回到一级菜单,全程不退出 TUI。
+            // 命令放到后台线程执行,超过 FLASH_DELAY 仍未结束才显示「执行中」页
+            let outcome = {
+                let refs: Vec<&str> = cmd.iter().map(String::as_str).collect();
+                let (tx, rx) = std::sync::mpsc::channel();
+                std::thread::scope(|scope| -> Result<run::LaunchOutcome> {
+                    scope.spawn(move || {
+                        let _ = tx.send(run::launch_captured(git, &refs));
+                    });
+                    match rx.recv_timeout(FLASH_DELAY) {
+                        Ok(result) => result,
+                        Err(_) => {
+                            session.flash(&format!("$ git {}", cmd.join(" ")))?;
+                            rx.recv()
+                                .map_err(|_| anyhow::anyhow!("git worker disconnected"))?
+                        }
+                    }
+                })?
+            };
+            match outcome {
                 run::LaunchOutcome::Failed(reason) => {
                     session.notice(&tr_f("menu.failed", &[("cmd", &cmd[0])]), &reason)?;
                 }
@@ -133,22 +155,15 @@ fn menu_loop(git: &Git, light: bool) -> Result<()> {
                     );
                     session.notice(&tr_f("menu.done", &[("cmd", &cmd[0])]), &body)?;
                 }
-                run::LaunchOutcome::Conflicts(out) => break (cmd, out),
+                // 冲突:移交终端所有权,现场直通冲突解决界面
+                run::LaunchOutcome::Conflicts(out) => break (cmd, out, session.into_terminal()?),
             }
         }
-        // session 在此 drop,恢复终端
     };
 
-    // 已回到常规终端:补一行命令历史,回放捕获的 git 输出并接管冲突
-    println!("[git-pincer] $ git {}", cmd.join(" "));
-    replay(&out);
-    resolve_loop(git, light)
-}
-
-/// 把捕获的 git 输出原样回放到终端,保留在滚动历史里。
-fn replay(out: &std::process::Output) {
-    print!("{}", String::from_utf8_lossy(&out.stdout));
-    eprint!("{}", String::from_utf8_lossy(&out.stderr));
+    // 在移交的终端上直接进入解决界面(不退出 alternate screen,不闪屏);
+    // 命令历史与捕获的 git 输出由 resolve_from_menu 在恢复终端后补打
+    resolve_from_menu(git, light, terminal, &cmd.join(" "), &out)
 }
 
 /// 成功弹框正文的最大行数,超出时只保留末尾。

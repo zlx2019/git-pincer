@@ -57,7 +57,10 @@ pub struct UiState {
     pub(crate) theme: theme::Theme,
     /// 高亮信息缓存(词级强调 / 语法高亮)
     pub(crate) cache: highlight::HighlightCache,
-    /// 状态修订号:改动合并内容的按键后自增,用于结果栏语法高亮的失效重算
+    /// 渲染行缓存(纯导航按键零重建)
+    pub(crate) rows: rows::RowCache,
+    /// 状态修订号:改动合并内容的按键后自增,用于结果栏语法高亮与
+    /// 渲染行缓存的失效重算
     pub(crate) revision: u64,
 }
 
@@ -75,7 +78,20 @@ pub fn run_session(
     if !std::io::stdout().is_terminal() {
         anyhow::bail!("{}", tr("common.need_tty_resolve"));
     }
-    let mut terminal = ratatui::init();
+    run_session_in(ratatui::init(), session, write_file, light)
+}
+
+/// 在移交的终端现场上运行交互会话(菜单转入冲突解决时复用,
+/// 全程不退出 alternate screen,避免闪屏);结束时恢复终端。
+///
+/// 不做预清屏:ratatui 按缓冲差量重绘,首帧一次性覆盖上一页,
+/// 中间不出现空白闪帧。
+pub(crate) fn run_session_in(
+    mut terminal: DefaultTerminal,
+    session: &mut Session,
+    write_file: &mut dyn FnMut(&str, &[u8]) -> Result<()>,
+    light: bool,
+) -> Result<Outcome> {
     let result = event_loop(&mut terminal, session, write_file, light);
     ratatui::restore();
     result
@@ -216,12 +232,12 @@ fn handle_file_key(session: &mut Session, code: KeyCode, ui: &mut UiState) -> bo
                 false
             }
             KeyCode::Char('H') => {
-                let lines = merge.chunks[merge.cursor].ours.clone();
+                let lines = merge.chunks[merge.cursor].ours_lines().to_vec();
                 ui.message = copy_feedback(&lines, tr("ui.copy_local"));
                 false
             }
             KeyCode::Char('L') => {
-                let lines = merge.chunks[merge.cursor].theirs.clone();
+                let lines = merge.chunks[merge.cursor].theirs_lines().to_vec();
                 ui.message = copy_feedback(&lines, tr("ui.copy_remote"));
                 false
             }

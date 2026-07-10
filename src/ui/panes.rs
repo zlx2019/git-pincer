@@ -14,7 +14,7 @@ use ratatui::widgets::{
 use crate::app::{FileMerge, SideState};
 
 use super::highlight::{FileHighlight, PaneSyntax};
-use super::rows::{Cell, Row, build_rows};
+use super::rows::{Cell, ChangeType, Row};
 use super::theme::Theme;
 
 /// 三栏之一。
@@ -143,15 +143,20 @@ fn compose_spans(
     spans
 }
 
-/// 组装一栏中的一行(gutter 符号 + 行号 + 内容 / 占位 / 空白)。
+/// 一行的两个着色层:(词级强调区间, 语法高亮段)。
+type LineLayers<'a> = (&'a [Range<usize>], &'a [(Color, Range<usize>)]);
+
+/// 组装一栏中的一行(gutter 符号 + 行号 + 内容 / 占位 / 空白);
+/// `current` 为该行是否属于光标所在块(渲染时现算,行列表可跨帧缓存),
+/// `(emphasis, fg_spans)` 为词级强调与语法高亮两个着色层。
 fn cell_line(
     row: &Row,
+    current: bool,
     cell: &Cell,
     pane: Pane,
     budget: &CellBudget,
     theme: &Theme,
-    emphasis: &[Range<usize>],
-    fg_spans: &[(Color, Range<usize>)],
+    (emphasis, fg_spans): LineLayers<'_>,
 ) -> Line<'static> {
     let mut style = Style::new();
     // 色带只画在发生改动的栏 + 结果栏(IDEA 式),随块解决消失;当前块同色相提亮
@@ -162,7 +167,7 @@ fn cell_line(
     };
     if banded
         && !row.resolved
-        && let Some(bg) = theme.band_bg(row.change, row.current)
+        && let Some(bg) = theme.band_bg(row.change, current)
     {
         style = style.bg(bg);
     }
@@ -183,7 +188,7 @@ fn cell_line(
         }
     };
     if budget.no_width > 0 {
-        let no_style = if row.current {
+        let no_style = if current {
             Style::new().fg(theme.fg_bright)
         } else {
             Style::new().fg(theme.fg_dim)
@@ -200,7 +205,7 @@ fn cell_line(
             text,
             fg_spans,
             emphasis,
-            theme.emph_bg(row.change, row.current),
+            theme.emph_bg(row.change, current),
         ));
     }
     Line::from(spans).style(style)
@@ -213,15 +218,17 @@ fn pane_fg(pane: Option<&PaneSyntax>, no: usize) -> &[(Color, Range<usize>)] {
 }
 
 /// 三列正文;根据光标调整滚动位置并写回,跨帧保持视口稳定。
+///
+/// 渲染行由 [`RowCache`](super::rows::RowCache) 提供(纯导航按键零重建),
+/// 光标所在块在此处用 `row.chunk` 现比。
 pub(crate) fn draw_columns(
     frame: &mut Frame,
     area: Rect,
     merge: &mut FileMerge,
-    folded: bool,
     theme: &Theme,
     highlight: &FileHighlight,
+    (rows, chunk_starts, max_no): (&[Row], &[usize], usize),
 ) {
-    let (rows, chunk_starts) = build_rows(merge, folded);
     // 上下边框各占一行
     let height = (area.height as usize).saturating_sub(2);
     let max_scroll = rows.len().saturating_sub(height);
@@ -236,16 +243,6 @@ pub(crate) fn draw_columns(
     merge.scroll = scroll;
 
     let visible = &rows[scroll.min(rows.len())..rows.len().min(scroll + height)];
-    // 行号列宽按全文最大行号计算,滚动时保持稳定
-    let max_no = rows
-        .iter()
-        .flat_map(|r| [&r.ours, &r.result, &r.theirs])
-        .filter_map(|c| match c {
-            Cell::Line { no, .. } => Some(*no),
-            _ => None,
-        })
-        .max()
-        .unwrap_or(1);
 
     let cols = split_columns(area);
     let panes = [
@@ -287,20 +284,31 @@ pub(crate) fn draw_columns(
                         .map_or(&[], Vec::as_slice),
                     _ => &[],
                 };
-                // 语法高亮按栏内绝对行号寻址
-                let fg_spans = match (pane, cell) {
+                // 语法高亮寻址:左右栏按栏内绝对行号,结果栏按 (块, 块内偏移)
+                let fg_spans: &[(Color, Range<usize>)] = match (pane, cell) {
                     (Pane::Local, Cell::Line { no, .. }) => pane_fg(highlight.ours.as_ref(), *no),
-                    (Pane::Result, Cell::Line { no, .. }) => {
-                        pane_fg(highlight.result.as_ref(), *no)
-                    }
+                    (Pane::Result, Cell::Line { offset, .. }) => highlight
+                        .result
+                        .as_ref()
+                        .map_or(&[], |r| r.spans(row.chunk, *offset)),
                     (Pane::Remote, Cell::Line { no, .. }) => {
                         pane_fg(highlight.theirs.as_ref(), *no)
                     }
                     _ => &[],
                 };
+                // 光标所在块(折叠行只出现在稳定块上,恒非当前)
+                let current = row.chunk == merge.cursor && row.change != ChangeType::None;
                 match row.fold {
                     Some(n) => fold_line(n, pane, inner.width, theme),
-                    None => cell_line(row, cell, pane, &budget, theme, emphasis, fg_spans),
+                    None => cell_line(
+                        row,
+                        current,
+                        cell,
+                        pane,
+                        &budget,
+                        theme,
+                        (emphasis, fg_spans),
+                    ),
                 }
             })
             .collect();
