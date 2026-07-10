@@ -58,7 +58,16 @@ git-pincer abort                # 中止进行中的合并操作(有确认)
 git-pincer completions zsh      # 生成 shell 补全脚本(bash/zsh/fish/powershell/elvish)
 ```
 
-Tab 补全需要一次性接入你的 shell,如 `echo 'eval "$(git-pincer completions zsh)"' >> ~/.zshrc`(bash 写入 `~/.bashrc`;fish 用 `git-pincer completions fish > ~/.config/fish/completions/git-pincer.fish`)。
+Tab 补全需要一次性接入你的 shell:
+
+```bash
+# zsh
+echo 'eval "$(git-pincer completions zsh)"' >> ~/.zshrc
+# bash
+echo 'eval "$(git-pincer completions bash)"' >> ~/.bashrc
+# fish
+git-pincer completions fish > ~/.config/fish/completions/git-pincer.fish
+```
 
 全局选项:
 

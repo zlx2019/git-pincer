@@ -58,7 +58,16 @@ git-pincer abort                # abort the operation in progress (with confirma
 git-pincer completions zsh      # shell completion script (bash/zsh/fish/powershell/elvish)
 ```
 
-Tab completion needs a one-time hook into your shell, e.g. `echo 'eval "$(git-pincer completions zsh)"' >> ~/.zshrc` (bash: `~/.bashrc`; fish: `git-pincer completions fish > ~/.config/fish/completions/git-pincer.fish`).
+Tab completion needs a one-time hook into your shell:
+
+```bash
+# zsh
+echo 'eval "$(git-pincer completions zsh)"' >> ~/.zshrc
+# bash
+echo 'eval "$(git-pincer completions bash)"' >> ~/.bashrc
+# fish
+git-pincer completions fish > ~/.config/fish/completions/git-pincer.fish
+```
 
 Global options:
 
