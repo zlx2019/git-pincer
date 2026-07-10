@@ -57,8 +57,26 @@ pub fn resolve_loop(git: &Git, light: bool) -> Result<()> {
 }
 
 /// 由冲突文件列表构建会话:读取三份 stage 内容,含 NUL 的按二进制降级处理。
+///
+/// 全部 stage 的 blob 用一个 `git cat-file --batch` 进程按序批量读回,
+/// 避免逐文件逐 stage spawn 进程。
 fn build_session(git: &Git, files: &[ConflictedFile]) -> Result<Session> {
     let state = git.state()?;
+    let oids: Vec<&str> = files
+        .iter()
+        .flat_map(|f| [f.base.as_deref(), f.ours.as_deref(), f.theirs.as_deref()])
+        .flatten()
+        .collect();
+    let mut blobs = git.read_blobs(&oids)?.into_iter();
+    // 应答与请求同序:缺失的 stage 不在请求中,取空内容
+    let mut take = |oid: &Option<String>| -> Vec<u8> {
+        if oid.is_some() {
+            blobs.next().unwrap_or_default()
+        } else {
+            Vec::new()
+        }
+    };
+
     let mut entries = Vec::new();
     for (index, file) in files.iter().enumerate() {
         println!(
@@ -72,16 +90,9 @@ fn build_session(git: &Git, files: &[ConflictedFile]) -> Result<Session> {
                 ],
             )
         );
-        let read = |present: bool, stage: u8| -> Result<Vec<u8>> {
-            if present {
-                Ok(git.read_stage(&file.path, stage)?)
-            } else {
-                Ok(Vec::new())
-            }
-        };
-        let base = read(file.has_base, 1)?;
-        let ours = read(file.has_ours, 2)?;
-        let theirs = read(file.has_theirs, 3)?;
+        let base = take(&file.base);
+        let ours = take(&file.ours);
+        let theirs = take(&file.theirs);
         if base.contains(&0) || ours.contains(&0) || theirs.contains(&0) {
             entries.push(FileEntry::Binary {
                 path: file.path.clone(),

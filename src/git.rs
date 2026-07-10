@@ -64,16 +64,19 @@ impl RepoState {
 }
 
 /// 一个处于冲突状态的文件及其在 index 中的 stage 分布。
+///
+/// 各 stage 记录 blob oid(缺失该 stage 时为 None),
+/// 供 [`Git::read_blobs`] 单进程批量读取内容。
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct ConflictedFile {
     /// 相对仓库根目录的路径
     pub path: String,
-    /// 是否存在 stage 1(base;add/add 冲突时缺失)
-    pub has_base: bool,
-    /// 是否存在 stage 2(ours;对方删除本方修改时才缺失本方)
-    pub has_ours: bool,
-    /// 是否存在 stage 3(theirs)
-    pub has_theirs: bool,
+    /// stage 1(base)的 blob oid;add/add 冲突时缺失
+    pub base: Option<String>,
+    /// stage 2(ours)的 blob oid;对方删除本方修改时才缺失本方
+    pub ours: Option<String>,
+    /// stage 3(theirs)的 blob oid
+    pub theirs: Option<String>,
 }
 
 /// 仓库体征:主菜单 RPG 状态面板展示的数据,打开菜单时查询一次。
@@ -226,6 +229,58 @@ impl Git {
         Ok(self.run_ok(&["show", &spec])?.stdout)
     }
 
+    /// 用单个 `git cat-file --batch` 进程批量读取 blob,按请求顺序返回。
+    ///
+    /// 逐文件 `git show` 每个 stage 都要 spawn 一次进程(实测 ~12-16ms),
+    /// 冲突文件多时进入 TUI 前的等待明显;这里改为请求-应答式复用一个
+    /// 子进程,进程开销从 O(3N) 降为 O(1)。
+    pub fn read_blobs(&self, oids: &[&str]) -> Result<Vec<Vec<u8>>, GitError> {
+        use std::io::{BufRead, BufReader, Read, Write};
+
+        if oids.is_empty() {
+            return Ok(Vec::new());
+        }
+        if self.verbose {
+            eprintln!("[git] git cat-file --batch ({} blobs)", oids.len());
+        }
+        let mut child = base_git(&self.top)
+            .args(["cat-file", "--batch"])
+            .stdin(std::process::Stdio::piped())
+            .stdout(std::process::Stdio::piped())
+            .stderr(std::process::Stdio::null())
+            .spawn()
+            .map_err(spawn_err)?;
+        // 逐条请求-应答,避免双向管道同时写满导致的死锁
+        let mut stdin = child.stdin.take().ok_or(GitError::NotFound)?;
+        let mut stdout = BufReader::new(child.stdout.take().ok_or(GitError::NotFound)?);
+        let failed = |detail: String| GitError::Failed {
+            cmd: "cat-file --batch".to_owned(),
+            stderr: detail,
+        };
+
+        let mut blobs = Vec::with_capacity(oids.len());
+        for oid in oids {
+            stdin.write_all(format!("{oid}\n").as_bytes())?;
+            stdin.flush()?;
+            // 应答头:`<oid> <type> <size>` 或 `<oid> missing`
+            let mut header = String::new();
+            stdout.read_line(&mut header)?;
+            let size: usize = header
+                .split_whitespace()
+                .nth(2)
+                .and_then(|s| s.parse().ok())
+                .ok_or_else(|| failed(format!("对象 {oid} 不可读: {}", header.trim())))?;
+            let mut content = vec![0u8; size];
+            stdout.read_exact(&mut content)?;
+            // 每个对象后跟一个换行分隔符
+            stdout.read_exact(&mut [0u8; 1])?;
+            blobs.push(content);
+        }
+        drop(stdin);
+        child.wait()?;
+        Ok(blobs)
+    }
+
     /// 列出可作为 merge / rebase 目标的分支:本地 + 远程跟踪,
     /// 排除当前分支与 HEAD 符号引用。
     pub fn list_branches(&self) -> Result<Vec<String>, GitError> {
@@ -362,23 +417,26 @@ fn parse_ls_files_unmerged(text: &str) -> Vec<ConflictedFile> {
         let Some((meta, path)) = entry.split_once('\t') else {
             continue;
         };
-        let stage = meta.split_whitespace().nth(2).unwrap_or("0");
+        let mut fields = meta.split_whitespace().skip(1);
+        let (Some(oid), Some(stage)) = (fields.next(), fields.next()) else {
+            continue;
+        };
         let idx = match files.iter().position(|f| f.path == path) {
             Some(i) => i,
             None => {
                 files.push(ConflictedFile {
                     path: path.to_owned(),
-                    has_base: false,
-                    has_ours: false,
-                    has_theirs: false,
+                    base: None,
+                    ours: None,
+                    theirs: None,
                 });
                 files.len() - 1
             }
         };
         match stage {
-            "1" => files[idx].has_base = true,
-            "2" => files[idx].has_ours = true,
-            "3" => files[idx].has_theirs = true,
+            "1" => files[idx].base = Some(oid.to_owned()),
+            "2" => files[idx].ours = Some(oid.to_owned()),
+            "3" => files[idx].theirs = Some(oid.to_owned()),
             _ => {}
         }
     }
@@ -398,14 +456,14 @@ mod tests {
             files[0],
             ConflictedFile {
                 path: "src/a.rs".to_owned(),
-                has_base: true,
-                has_ours: true,
-                has_theirs: true,
+                base: Some("aaaa".to_owned()),
+                ours: Some("bbbb".to_owned()),
+                theirs: Some("cccc".to_owned()),
             }
         );
         // add/add 冲突:没有 stage 1
-        assert!(!files[1].has_base);
-        assert!(files[1].has_ours && files[1].has_theirs);
+        assert!(files[1].base.is_none());
+        assert!(files[1].ours.is_some() && files[1].theirs.is_some());
     }
 
     #[test]
