@@ -33,7 +33,15 @@ pub fn draw(frame: &mut Frame, session: &mut Session, ui: &mut UiState) {
         FileEntry::Text(merge) => {
             let highlight = ui.cache.get(file_idx, merge, ui.revision, ui.theme.light);
             let rows = ui.rows.get(file_idx, merge, ui.revision, folded);
-            draw_columns(frame, body, merge, &ui.theme, highlight, rows);
+            draw_columns(
+                frame,
+                body,
+                merge,
+                &ui.theme,
+                highlight,
+                rows,
+                &mut ui.scroll_request,
+            );
         }
         FileEntry::Binary {
             path,
@@ -42,6 +50,8 @@ pub fn draw(frame: &mut Frame, session: &mut Session, ui: &mut UiState) {
             choice,
         } => draw_binary(frame, body, path, ours, theirs, *choice, &ui.theme),
     }
+    // 二进制视图不消费滚动请求,统一清零避免残留到后续文本文件
+    ui.scroll_request = 0;
     draw_hints(frame, hints, &ui.theme);
     frame.render_widget(
         Paragraph::new(ui.message.as_str()).style(Style::new().fg(ui.theme.amber)),
@@ -260,7 +270,9 @@ fn draw_help(frame: &mut Frame, theme: &Theme) {
             .collect()
     };
 
-    let area = centered_rect(frame.area(), 78, 10);
+    // 高度按最长一栏自适应(上下边框各占一行)
+    let overlay_h = left_items.len().max(right_items.len()) as u16 + 2;
+    let area = centered_rect(frame.area(), 78, overlay_h);
     frame.render_widget(Clear, area);
     let block = Block::bordered()
         .border_type(BorderType::Rounded)
@@ -396,6 +408,50 @@ mod tests {
             "选中块贴在视口底部(target={target}, scroll={})",
             m.scroll
         );
+    }
+
+    /// 手动滚动脱离光标跟随且重绘不回拉;作用于光标的动作重新吸附
+    #[test]
+    fn manual_scroll_detaches_and_actions_reattach() {
+        let stable: String = (1..=200).map(|i| format!("s{i}\n")).collect();
+        let base = format!("a\n{stable}");
+        let ours = format!("A\n{stable}");
+        let theirs = format!("X\n{stable}");
+        let merge = FileMerge::from_three_way("demo.txt".to_owned(), &base, &ours, &theirs);
+        let mut session = Session::new(vec![FileEntry::Text(merge)], "merge".to_owned());
+        session.folded = false;
+        let mut ui = UiState::default();
+        let mut terminal = Terminal::new(TestBackend::new(100, 24)).unwrap();
+        let scroll_of = |s: &Session| match s.current_file() {
+            FileEntry::Text(m) => (m.scroll, m.follow),
+            FileEntry::Binary { .. } => unreachable!(),
+        };
+
+        terminal.draw(|f| draw(f, &mut session, &mut ui)).unwrap();
+        assert_eq!(scroll_of(&session), (0, true));
+
+        // 两次半页下滚:请求被消费,视口前进并脱离跟随
+        ui.scroll_request = 2;
+        terminal.draw(|f| draw(f, &mut session, &mut ui)).unwrap();
+        let (scrolled, follow) = scroll_of(&session);
+        assert!(scrolled > 0);
+        assert!(!follow);
+        assert_eq!(ui.scroll_request, 0);
+
+        // 光标块已在视口外,重绘不得回拉(脱离跟随的意义所在)
+        terminal.draw(|f| draw(f, &mut session, &mut ui)).unwrap();
+        assert_eq!(scroll_of(&session), (scrolled, false));
+
+        // 作用于光标的动作(如跳冲突)恢复跟随,视口吸附回光标块
+        super::super::handle_file_key(
+            &mut session,
+            super::super::keymap::Action::NextConflict,
+            &mut ui,
+        );
+        terminal.draw(|f| draw(f, &mut session, &mut ui)).unwrap();
+        let (snapped, follow) = scroll_of(&session);
+        assert!(follow);
+        assert!(snapped < scrolled, "视口应吸附回顶部的冲突块");
     }
 
     /// 二进制条目渲染不 panic

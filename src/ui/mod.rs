@@ -65,6 +65,8 @@ pub struct UiState {
     /// 状态修订号:改动合并内容的按键后自增,用于结果栏语法高亮与
     /// 渲染行缓存的失效重算
     pub(crate) revision: u64,
+    /// 待应用的手动滚动量(半页为单位,正数向下;绘制时消费)
+    pub(crate) scroll_request: isize,
 }
 
 /// 运行交互会话直至完成或退出。
@@ -153,6 +155,9 @@ fn event_loop(
             Action::Help => ui.show_help = true,
             Action::NextFile => session.next_file(),
             Action::ToggleFold => session.folded = !session.folded,
+            // 手动滚动只记录请求,行数与钳制在绘制时按视口高度结算
+            Action::ScrollDown => ui.scroll_request += 1,
+            Action::ScrollUp => ui.scroll_request -= 1,
             Action::WriteFile => {
                 if write_current(session, write_file, &mut ui)? {
                     // 写盘会自动应用非冲突改动,结果栏内容可能变化
@@ -186,77 +191,81 @@ fn event_loop(
 /// 处理作用于当前文件的普通动作;返回是否改动了合并内容(结果栏高亮失效用)。
 fn handle_file_key(session: &mut Session, action: Action, ui: &mut UiState) -> bool {
     match session.current_file_mut() {
-        FileEntry::Text(merge) => match action {
-            Action::TakeLocal => {
-                merge.apply(Side::Ours);
-                true
+        FileEntry::Text(merge) => {
+            // 任何作用于光标块的动作都恢复视口跟随(纯滚动不经过此处)
+            merge.follow = true;
+            match action {
+                Action::TakeLocal => {
+                    merge.apply(Side::Ours);
+                    true
+                }
+                Action::TakeRemote => {
+                    merge.apply(Side::Theirs);
+                    true
+                }
+                // 忽略当前块所有仍待处理的侧(已取用的内容保留)
+                Action::IgnoreChunk => {
+                    merge.ignore(Side::Ours);
+                    merge.ignore(Side::Theirs);
+                    true
+                }
+                Action::UndoChunk => {
+                    merge.undo();
+                    true
+                }
+                Action::UndoFile => {
+                    merge.undo_all();
+                    ui.message = tr("ui.undone_all").to_owned();
+                    true
+                }
+                Action::ApplyNonConflict => {
+                    merge.apply_all_nonconflict();
+                    ui.message = tr("ui.applied_all").to_owned();
+                    true
+                }
+                Action::NextChange => {
+                    merge.next_change();
+                    false
+                }
+                Action::PrevChange => {
+                    merge.prev_change();
+                    false
+                }
+                Action::NextConflict => {
+                    merge.next_conflict();
+                    false
+                }
+                Action::PrevConflict => {
+                    merge.prev_conflict();
+                    false
+                }
+                // 复制动作(终端框选会横跨三栏,复制键绕开这个限制):
+                // 块结果 / 整个文件结果 / 块本地侧 / 块远端侧
+                Action::CopyChunk => {
+                    let lines = merge.current_content(merge.cursor);
+                    ui.message = copy_feedback(&lines, tr("ui.copy_chunk"));
+                    false
+                }
+                Action::CopyFile => {
+                    ui.message = match copy_to_clipboard(&merge.resolved_content()) {
+                        Ok(()) => tr("ui.copied_file").to_owned(),
+                        Err(e) => tr_f("ui.copy_failed", &[("e", &e.to_string())]),
+                    };
+                    false
+                }
+                Action::CopyLocal => {
+                    let lines = merge.chunks[merge.cursor].ours_lines().to_vec();
+                    ui.message = copy_feedback(&lines, tr("ui.copy_local"));
+                    false
+                }
+                Action::CopyRemote => {
+                    let lines = merge.chunks[merge.cursor].theirs_lines().to_vec();
+                    ui.message = copy_feedback(&lines, tr("ui.copy_remote"));
+                    false
+                }
+                _ => false,
             }
-            Action::TakeRemote => {
-                merge.apply(Side::Theirs);
-                true
-            }
-            // 忽略当前块所有仍待处理的侧(已取用的内容保留)
-            Action::IgnoreChunk => {
-                merge.ignore(Side::Ours);
-                merge.ignore(Side::Theirs);
-                true
-            }
-            Action::UndoChunk => {
-                merge.undo();
-                true
-            }
-            Action::UndoFile => {
-                merge.undo_all();
-                ui.message = tr("ui.undone_all").to_owned();
-                true
-            }
-            Action::ApplyNonConflict => {
-                merge.apply_all_nonconflict();
-                ui.message = tr("ui.applied_all").to_owned();
-                true
-            }
-            Action::NextChange => {
-                merge.next_change();
-                false
-            }
-            Action::PrevChange => {
-                merge.prev_change();
-                false
-            }
-            Action::NextConflict => {
-                merge.next_conflict();
-                false
-            }
-            Action::PrevConflict => {
-                merge.prev_conflict();
-                false
-            }
-            // 复制动作(终端框选会横跨三栏,复制键绕开这个限制):
-            // 块结果 / 整个文件结果 / 块本地侧 / 块远端侧
-            Action::CopyChunk => {
-                let lines = merge.current_content(merge.cursor);
-                ui.message = copy_feedback(&lines, tr("ui.copy_chunk"));
-                false
-            }
-            Action::CopyFile => {
-                ui.message = match copy_to_clipboard(&merge.resolved_content()) {
-                    Ok(()) => tr("ui.copied_file").to_owned(),
-                    Err(e) => tr_f("ui.copy_failed", &[("e", &e.to_string())]),
-                };
-                false
-            }
-            Action::CopyLocal => {
-                let lines = merge.chunks[merge.cursor].ours_lines().to_vec();
-                ui.message = copy_feedback(&lines, tr("ui.copy_local"));
-                false
-            }
-            Action::CopyRemote => {
-                let lines = merge.chunks[merge.cursor].theirs_lines().to_vec();
-                ui.message = copy_feedback(&lines, tr("ui.copy_remote"));
-                false
-            }
-            _ => false,
-        },
+        }
         FileEntry::Binary { choice, .. } => {
             match action {
                 Action::TakeLocal => *choice = Some(Side::Ours),

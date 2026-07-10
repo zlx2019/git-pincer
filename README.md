@@ -106,6 +106,7 @@ cp fixtures/conflict.txt /tmp/ && git-pincer file /tmp/conflict.txt
 | `a` | Apply every non-conflicting change at once |
 | `j` / `k` | Move to the next / previous change chunk |
 | `n` / `p` | Jump to the next / previous unresolved conflict |
+| `Ctrl+d` / `Ctrl+u` | Scroll the viewport half a page down / up (navigation keys re-attach it to the cursor) |
 | `y` / `Y` | Copy the current chunk result / the whole file result |
 | `H` / `L` | Copy the local / remote side of the current chunk |
 | `w` | Write the file (auto-applies remaining non-conflict changes, then `git add`) |

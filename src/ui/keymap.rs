@@ -40,6 +40,10 @@ pub(crate) enum Action {
     NextConflict,
     /// 跳到上一个未解决冲突
     PrevConflict,
+    /// 视口下滚半页(脱离光标跟随)
+    ScrollDown,
+    /// 视口上滚半页(脱离光标跟随)
+    ScrollUp,
     /// 复制当前块结果
     CopyChunk,
     /// 复制整个文件结果
@@ -73,6 +77,8 @@ static ACTION_NAMES: &[(&str, Action)] = &[
     ("prev-change", Action::PrevChange),
     ("next-conflict", Action::NextConflict),
     ("prev-conflict", Action::PrevConflict),
+    ("scroll-down", Action::ScrollDown),
+    ("scroll-up", Action::ScrollUp),
     ("copy-chunk", Action::CopyChunk),
     ("copy-file", Action::CopyFile),
     ("copy-local", Action::CopyLocal),
@@ -88,8 +94,8 @@ static ACTION_NAMES: &[(&str, Action)] = &[
 struct Binding {
     /// 组的标识动作(布局列表以此引用)
     id: Action,
-    /// 键位 → 动作(如 u 撤销块、U 撤销整个文件同属一组)
-    keys: &'static [(KeyCode, Action)],
+    /// 键位(含修饰键)→ 动作(如 u 撤销块、U 撤销整个文件同属一组)
+    keys: &'static [(KeyCode, KeyModifiers, Action)],
     /// 提示条短文案的 i18n key;None 表示该组不进提示条
     hint: Option<&'static str>,
     /// 帮助浮层文案的 i18n key
@@ -101,8 +107,8 @@ static BINDINGS: &[Binding] = &[
     Binding {
         id: Action::TakeLocal,
         keys: &[
-            (KeyCode::Char('h'), Action::TakeLocal),
-            (KeyCode::Left, Action::TakeLocal),
+            (KeyCode::Char('h'), KeyModifiers::NONE, Action::TakeLocal),
+            (KeyCode::Left, KeyModifiers::NONE, Action::TakeLocal),
         ],
         hint: Some("ui.hint_left"),
         help: "ui.help_left",
@@ -110,58 +116,62 @@ static BINDINGS: &[Binding] = &[
     Binding {
         id: Action::TakeRemote,
         keys: &[
-            (KeyCode::Char('l'), Action::TakeRemote),
-            (KeyCode::Right, Action::TakeRemote),
+            (KeyCode::Char('l'), KeyModifiers::NONE, Action::TakeRemote),
+            (KeyCode::Right, KeyModifiers::NONE, Action::TakeRemote),
         ],
         hint: Some("ui.hint_right"),
         help: "ui.help_right",
     },
     Binding {
         id: Action::IgnoreChunk,
-        keys: &[(KeyCode::Char('x'), Action::IgnoreChunk)],
+        keys: &[(KeyCode::Char('x'), KeyModifiers::NONE, Action::IgnoreChunk)],
         hint: Some("ui.hint_ignore"),
         help: "ui.help_ignore",
     },
     Binding {
         id: Action::UndoChunk,
         keys: &[
-            (KeyCode::Char('u'), Action::UndoChunk),
-            (KeyCode::Char('U'), Action::UndoFile),
+            (KeyCode::Char('u'), KeyModifiers::NONE, Action::UndoChunk),
+            (KeyCode::Char('U'), KeyModifiers::NONE, Action::UndoFile),
         ],
         hint: Some("ui.hint_undo"),
         help: "ui.help_undo",
     },
     Binding {
         id: Action::EditChunk,
-        keys: &[(KeyCode::Char('e'), Action::EditChunk)],
+        keys: &[(KeyCode::Char('e'), KeyModifiers::NONE, Action::EditChunk)],
         hint: Some("ui.hint_edit"),
         help: "ui.help_edit",
     },
     Binding {
         id: Action::ApplyNonConflict,
-        keys: &[(KeyCode::Char('a'), Action::ApplyNonConflict)],
+        keys: &[(
+            KeyCode::Char('a'),
+            KeyModifiers::NONE,
+            Action::ApplyNonConflict,
+        )],
         hint: None,
         help: "ui.help_apply",
     },
     Binding {
         id: Action::WriteFile,
-        keys: &[(KeyCode::Char('w'), Action::WriteFile)],
+        keys: &[(KeyCode::Char('w'), KeyModifiers::NONE, Action::WriteFile)],
         hint: Some("ui.hint_write"),
         help: "ui.help_write",
     },
     Binding {
         id: Action::Quit,
-        keys: &[(KeyCode::Char('q'), Action::Quit)],
+        keys: &[(KeyCode::Char('q'), KeyModifiers::NONE, Action::Quit)],
         hint: Some("ui.hint_quit"),
         help: "ui.help_quit",
     },
     Binding {
         id: Action::NextChange,
         keys: &[
-            (KeyCode::Char('j'), Action::NextChange),
-            (KeyCode::Down, Action::NextChange),
-            (KeyCode::Char('k'), Action::PrevChange),
-            (KeyCode::Up, Action::PrevChange),
+            (KeyCode::Char('j'), KeyModifiers::NONE, Action::NextChange),
+            (KeyCode::Down, KeyModifiers::NONE, Action::NextChange),
+            (KeyCode::Char('k'), KeyModifiers::NONE, Action::PrevChange),
+            (KeyCode::Up, KeyModifiers::NONE, Action::PrevChange),
         ],
         hint: None,
         help: "ui.help_move",
@@ -169,48 +179,61 @@ static BINDINGS: &[Binding] = &[
     Binding {
         id: Action::NextConflict,
         keys: &[
-            (KeyCode::Char('n'), Action::NextConflict),
-            (KeyCode::Char('p'), Action::PrevConflict),
+            (KeyCode::Char('n'), KeyModifiers::NONE, Action::NextConflict),
+            (KeyCode::Char('p'), KeyModifiers::NONE, Action::PrevConflict),
         ],
         hint: Some("ui.hint_conflict"),
         help: "ui.help_jump",
     },
     Binding {
+        id: Action::ScrollDown,
+        keys: &[
+            (
+                KeyCode::Char('d'),
+                KeyModifiers::CONTROL,
+                Action::ScrollDown,
+            ),
+            (KeyCode::Char('u'), KeyModifiers::CONTROL, Action::ScrollUp),
+        ],
+        hint: None,
+        help: "ui.help_scroll",
+    },
+    Binding {
         id: Action::NextFile,
-        keys: &[(KeyCode::Tab, Action::NextFile)],
+        keys: &[(KeyCode::Tab, KeyModifiers::NONE, Action::NextFile)],
         hint: Some("ui.hint_file"),
         help: "ui.help_tab",
     },
     Binding {
         id: Action::ToggleFold,
-        keys: &[(KeyCode::Char('z'), Action::ToggleFold)],
+        keys: &[(KeyCode::Char('z'), KeyModifiers::NONE, Action::ToggleFold)],
         hint: Some("ui.hint_fold"),
         help: "ui.help_fold",
     },
     Binding {
         id: Action::CopyChunk,
-        keys: &[(KeyCode::Char('y'), Action::CopyChunk)],
+        keys: &[(KeyCode::Char('y'), KeyModifiers::NONE, Action::CopyChunk)],
         hint: None,
         help: "ui.help_copy_chunk",
     },
     Binding {
         id: Action::CopyFile,
-        keys: &[(KeyCode::Char('Y'), Action::CopyFile)],
+        keys: &[(KeyCode::Char('Y'), KeyModifiers::NONE, Action::CopyFile)],
         hint: None,
         help: "ui.help_copy_file",
     },
     Binding {
         id: Action::CopyLocal,
         keys: &[
-            (KeyCode::Char('H'), Action::CopyLocal),
-            (KeyCode::Char('L'), Action::CopyRemote),
+            (KeyCode::Char('H'), KeyModifiers::NONE, Action::CopyLocal),
+            (KeyCode::Char('L'), KeyModifiers::NONE, Action::CopyRemote),
         ],
         hint: None,
         help: "ui.help_copy_sides",
     },
     Binding {
         id: Action::Help,
-        keys: &[(KeyCode::Char('?'), Action::Help)],
+        keys: &[(KeyCode::Char('?'), KeyModifiers::NONE, Action::Help)],
         hint: Some("ui.hint_help"),
         help: "ui.help_help",
     },
@@ -247,6 +270,7 @@ static HELP_LEFT: &[Action] = &[
 static HELP_RIGHT: &[Action] = &[
     Action::NextChange,
     Action::NextConflict,
+    Action::ScrollDown,
     Action::NextFile,
     Action::ToggleFold,
     Action::CopyChunk,
@@ -316,7 +340,7 @@ fn build(overrides: &HashMap<String, String>) -> Result<Vec<EffectiveBinding>> {
     for binding in BINDINGS {
         let mut keys: Vec<(KeyCode, KeyModifiers, Action)> = Vec::new();
         let mut replaced: Vec<Action> = Vec::new();
-        for (code, action) in binding.keys {
+        for (code, mods, action) in binding.keys {
             match parsed.get(action) {
                 // 覆盖:该动作的全部默认键位替换为配置键(只插入一次)
                 Some(&(new_code, new_mods)) => {
@@ -325,7 +349,7 @@ fn build(overrides: &HashMap<String, String>) -> Result<Vec<EffectiveBinding>> {
                         replaced.push(*action);
                     }
                 }
-                None => keys.push((*code, KeyModifiers::NONE, *action)),
+                None => keys.push((*code, *mods, *action)),
             }
         }
         let (label, hint_label) = derive_labels(&keys);
@@ -545,6 +569,17 @@ mod tests {
         assert_eq!(f(KeyCode::Char('?')), Some(Action::Help));
         assert_eq!(f(KeyCode::Char('0')), None);
         assert_eq!(f(KeyCode::Esc), None);
+        // 滚动键要求 CONTROL 修饰;裸 d 未绑定,裸 u 仍是撤销
+        assert_eq!(
+            action_in(&t, KeyCode::Char('d'), KeyModifiers::CONTROL),
+            Some(Action::ScrollDown)
+        );
+        assert_eq!(
+            action_in(&t, KeyCode::Char('u'), KeyModifiers::CONTROL),
+            Some(Action::ScrollUp)
+        );
+        assert_eq!(f(KeyCode::Char('d')), None);
+        assert_eq!(f(KeyCode::Char('u')), Some(Action::UndoChunk));
         // 终端为大写字符附带的 SHIFT 修饰不影响匹配
         assert_eq!(
             action_in(&t, KeyCode::Char('U'), KeyModifiers::SHIFT),
@@ -557,7 +592,7 @@ mod tests {
     /// 默认表派生的标签与既有界面完全一致(视觉回归守卫)
     #[test]
     fn default_labels_match_previous_ui() {
-        let expected: [(&str, &str); 16] = [
+        let expected: [(&str, &str); 17] = [
             ("h / ←", "h"),
             ("l / →", "l"),
             ("x", "x"),
@@ -568,6 +603,7 @@ mod tests {
             ("q", "q"),
             ("j / k", "j/k"),
             ("n / p", "n/p"),
+            ("ctrl+d / ctrl+u", "ctrl+d/ctrl+u"),
             ("Tab", "⇥"),
             ("z", "z"),
             ("y", "y"),
@@ -701,7 +737,7 @@ mod tests {
         // 视觉布局守卫:提示条 11 项,帮助两栏各 8 项
         assert_eq!(hint_entries().count(), 11);
         let (left, right) = help_columns();
-        assert_eq!((left.len(), right.len()), (8, 8));
+        assert_eq!((left.len(), right.len()), (8, 9));
     }
 
     /// 每个绑定组的标识动作必须能从自身键位触发(防布局引用悬空)
@@ -709,7 +745,10 @@ mod tests {
     fn group_ids_are_reachable_from_own_keys() {
         for binding in BINDINGS {
             assert!(
-                binding.keys.iter().any(|(_, action)| *action == binding.id),
+                binding
+                    .keys
+                    .iter()
+                    .any(|(_, _, action)| *action == binding.id),
                 "组 {:?} 的标识动作不在自身键位中",
                 binding.id
             );
