@@ -32,8 +32,9 @@ pub struct Cli {
     pub lang: LangArg,
 }
 
-/// 界面语言选择。
-#[derive(Debug, Clone, Copy, PartialEq, Eq, clap::ValueEnum)]
+/// 界面语言选择(命令行与配置文件 `[ui] lang` 共用)。
+#[derive(Debug, Clone, Copy, PartialEq, Eq, clap::ValueEnum, serde::Deserialize)]
+#[serde(rename_all = "lowercase")]
 pub enum LangArg {
     /// 按系统 locale 自动选择(zh 前缀用中文,其余英文)
     Auto,
@@ -43,8 +44,9 @@ pub enum LangArg {
     En,
 }
 
-/// 界面主题选择。
-#[derive(Debug, Clone, Copy, PartialEq, Eq, clap::ValueEnum)]
+/// 界面主题选择(命令行与配置文件 `[ui] theme` 共用)。
+#[derive(Debug, Clone, Copy, PartialEq, Eq, clap::ValueEnum, serde::Deserialize)]
+#[serde(rename_all = "lowercase")]
 pub enum ThemeArg {
     /// 按终端环境自动选择(读 COLORFGBG,检测不到用深色)
     Auto,
@@ -76,14 +78,30 @@ pub enum Commands {
 impl Cli {
     /// Distribute and execute the selected subcommands.
     pub fn run(self) -> Result<()> {
-        crate::i18n::init(match self.lang {
-            LangArg::Zh => crate::i18n::Lang::Zh,
-            LangArg::En => crate::i18n::Lang::En,
-            LangArg::Auto => crate::i18n::detect(),
+        // --lang 显式指定时最早生效,让配置文件自身的报错也用对语言;
+        // i18n::init 首次调用生效,因此调用顺序即优先级:命令行 > 配置 > 系统探测
+        match self.lang {
+            LangArg::Zh => crate::i18n::init(crate::i18n::Lang::Zh),
+            LangArg::En => crate::i18n::init(crate::i18n::Lang::En),
+            LangArg::Auto => {}
+        }
+        let config = crate::config::load()?;
+        crate::i18n::init(match config.ui.lang {
+            Some(LangArg::Zh) => crate::i18n::Lang::Zh,
+            Some(LangArg::En) => crate::i18n::Lang::En,
+            _ => crate::i18n::detect(),
         });
-        let verbose = self.verbose;
+        crate::ui::keymap::init(&config.keys)?;
+        crate::ui::init_theme_overrides(&config.theme)?;
+
+        let verbose = self.verbose || config.ui.verbose.unwrap_or(false);
         let dir = self.repo.unwrap_or_else(|| PathBuf::from("."));
-        let light = match self.theme {
+        // 主题:命令行显式指定 > 配置文件 > 终端环境探测
+        let theme = match self.theme {
+            ThemeArg::Auto => config.ui.theme.unwrap_or(ThemeArg::Auto),
+            explicit => explicit,
+        };
+        let light = match theme {
             ThemeArg::Light => true,
             ThemeArg::Dark => false,
             ThemeArg::Auto => crate::ui::detect_light(),

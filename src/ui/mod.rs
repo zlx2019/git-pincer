@@ -18,7 +18,7 @@
 
 mod chrome;
 mod highlight;
-mod keymap;
+pub(crate) mod keymap;
 mod menu;
 mod panes;
 mod rows;
@@ -36,7 +36,7 @@ use keymap::Action;
 
 pub use chrome::draw;
 pub(crate) use menu::{MenuItem, MenuSession};
-pub(crate) use theme::detect_light;
+pub(crate) use theme::{detect_light, init_overrides as init_theme_overrides};
 
 /// 会话结束方式。
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -125,7 +125,7 @@ fn event_loop(
             ui.show_help = false;
             continue;
         }
-        let action = keymap::action_for(key.code);
+        let action = keymap::action_for(key.code, key.modifiers);
         // 除退出键外的任意键(含未绑定键)取消退出确认
         if action != Some(Action::Quit) {
             ui.pending_quit = false;
