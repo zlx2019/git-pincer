@@ -65,6 +65,27 @@ Global options:
 | `--lang <auto\|zh\|en>` | UI language; `auto` follows the system locale (Chinese locales get Chinese, everything else English) |
 | `-v, --verbose` | Echo every git command being executed |
 
+### Configuration
+
+An optional config file is read from `~/.config/git-pincer/config.toml` (`$XDG_CONFIG_HOME` is respected; `%APPDATA%\git-pincer\config.toml` on Windows; the `GIT_PINCER_CONFIG` env var overrides the path entirely). CLI flags always take precedence. A missing file just means defaults; a malformed one fails fast with a readable error.
+
+```toml
+[ui]                    # defaults for the global options above
+theme = "auto"          # auto | dark | light
+lang = "auto"           # auto | zh | en
+verbose = false
+
+[keys]                  # rebind actions — replaces all default keys of that action
+take-local = "o"
+write = "ctrl+s"        # modifiers: ctrl+ / alt+ / shift+; named keys: left, up, tab, enter, space, f1-f12…
+
+[theme.dark]            # override any color by name (same table exists as [theme.light])
+rpg_accent = "#ff7a2f"
+band_conflict = ["#3a1e22", "#5e2d35"]   # band_* / emph_* colors take a [normal, selected] pair
+```
+
+Rebindable actions: `take-local`, `take-remote`, `ignore`, `undo`, `undo-file`, `edit`, `apply-all`, `next-change`, `prev-change`, `next-conflict`, `prev-conflict`, `copy-chunk`, `copy-file`, `copy-local`, `copy-remote`, `write`, `next-file`, `fold`, `quit`, `help`. Overridden keys show up in the hint bar and help overlay automatically. Unknown action names, key conflicts and invalid colors are rejected at startup with the full list of valid values.
+
 Try the TUI without a git repository:
 
 ```bash

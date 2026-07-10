@@ -2,12 +2,111 @@
 //!
 //! 深色默认 Tokyo Night(暗色终端调校),浅色为 Maple Light 系配套色板;
 //! 选中提亮遵循「同色相加深增饱和」而非均匀加灰,避免颜色发浑。
+//! 用户可通过配置文件 `[theme.dark]` / `[theme.light]` 按颜色名覆盖,
+//! 覆盖在 [`Theme::select`] 构建时应用。
 
+use std::collections::HashMap;
 use std::sync::OnceLock;
 
+use anyhow::{Result, bail};
 use ratatui::style::Color;
 
+use crate::config::{ColorValue, ThemeSection, parse_hex};
+use crate::i18n::tr_f;
+
 use super::rows::ChangeType;
+
+/// 可覆盖的颜色名全集:(名字, 是否为「(普通, 选中)」双色对)。
+const COLOR_FIELDS: &[(&str, bool)] = &[
+    ("fg_dim", false),
+    ("fg_bright", false),
+    ("blue", false),
+    ("green", false),
+    ("red", false),
+    ("amber", false),
+    ("border", false),
+    ("badge_fg", false),
+    ("scrollbar_thumb", false),
+    ("keycap_fg", false),
+    ("keycap_bg", false),
+    ("hint_fg", false),
+    ("logo", false),
+    ("placeholder_fg", false),
+    ("rpg_frame", false),
+    ("rpg_accent", false),
+    ("rpg_hp", false),
+    ("rpg_mp", false),
+    ("rpg_exp", false),
+    ("rpg_gauge_empty", false),
+    ("rpg_gold", false),
+    ("band_modified", true),
+    ("band_added", true),
+    ("band_deleted", true),
+    ("band_conflict", true),
+    ("emph_modified", true),
+    ("emph_added", true),
+    ("emph_deleted", true),
+    ("emph_conflict", true),
+];
+
+/// 解析后的单条覆盖值。
+#[derive(Debug, Clone, Copy)]
+enum OverrideValue {
+    /// 单色
+    Single((u8, u8, u8)),
+    /// (普通, 选中) 双色
+    Pair((u8, u8, u8), (u8, u8, u8)),
+}
+
+/// 深 / 浅两套已解析的覆盖表。
+type Overrides = HashMap<String, OverrideValue>;
+
+/// 进程内的主题覆盖(init 冻结;未 init 视同无覆盖)。
+static OVERRIDES: OnceLock<(Overrides, Overrides)> = OnceLock::new();
+
+/// 校验并应用配置的 `[theme]` 覆盖(进程内仅首次调用生效,
+/// 应在构建任何 [`Theme`] 之前调用)。
+pub(crate) fn init_overrides(section: &ThemeSection) -> Result<()> {
+    let parsed = (validate(&section.dark)?, validate(&section.light)?);
+    let _ = OVERRIDES.set(parsed);
+    Ok(())
+}
+
+/// 校验一套覆盖:颜色名必须存在,值形态(单色 / 双色)与字段匹配且为合法 hex。
+fn validate(raw: &HashMap<String, ColorValue>) -> Result<Overrides> {
+    let mut out = Overrides::new();
+    for (name, value) in raw {
+        let Some(&(_, is_pair)) = COLOR_FIELDS.iter().find(|(n, _)| n == name) else {
+            let list: Vec<&str> = COLOR_FIELDS.iter().map(|(n, _)| *n).collect();
+            bail!(
+                "{}",
+                tr_f(
+                    "config.bad_color_name",
+                    &[("name", name), ("list", &list.join(", "))],
+                )
+            );
+        };
+        let bad = |shown: &str| {
+            anyhow::anyhow!(
+                "{}",
+                tr_f("config.bad_color", &[("name", name), ("value", shown)])
+            )
+        };
+        let parsed = match value {
+            ColorValue::Single(hex) if !is_pair => {
+                OverrideValue::Single(parse_hex(hex).ok_or_else(|| bad(hex))?)
+            }
+            ColorValue::Pair([normal, selected]) if is_pair => OverrideValue::Pair(
+                parse_hex(normal).ok_or_else(|| bad(normal))?,
+                parse_hex(selected).ok_or_else(|| bad(selected))?,
+            ),
+            ColorValue::Single(hex) => return Err(bad(hex)),
+            ColorValue::Pair([normal, _]) => return Err(bad(normal)),
+        };
+        out.insert(name.clone(), parsed);
+    }
+    Ok(out)
+}
 
 /// 界面主题:所有渲染颜色的单一来源。
 #[derive(Debug, Clone)]
@@ -75,13 +174,75 @@ pub(crate) struct Theme {
 }
 
 impl Theme {
-    /// 按变体选择主题:浅色终端用 [`Theme::light`],否则 [`Theme::tokyo_night`]。
+    /// 按变体选择主题:浅色终端用 [`Theme::light`],否则 [`Theme::tokyo_night`];
+    /// 随后应用配置文件的同变体颜色覆盖。
     pub(crate) fn select(light: bool) -> Self {
-        if light {
+        let mut theme = if light {
             Self::light()
         } else {
             Self::tokyo_night()
+        };
+        if let Some((dark_overrides, light_overrides)) = OVERRIDES.get() {
+            let overrides = if light {
+                light_overrides
+            } else {
+                dark_overrides
+            };
+            for (name, value) in overrides {
+                theme.set_color(name, *value);
+            }
         }
+        theme
+    }
+
+    /// 按名字写入一个颜色覆盖;未知名字返回 false(名字集见 [`COLOR_FIELDS`])。
+    fn set_color(&mut self, name: &str, value: OverrideValue) -> bool {
+        let single = |rgb: (u8, u8, u8)| term_color(rgb.0, rgb.1, rgb.2);
+        match (name, value) {
+            ("fg_dim", OverrideValue::Single(c)) => self.fg_dim = single(c),
+            ("fg_bright", OverrideValue::Single(c)) => self.fg_bright = single(c),
+            ("blue", OverrideValue::Single(c)) => self.blue = single(c),
+            ("green", OverrideValue::Single(c)) => self.green = single(c),
+            ("red", OverrideValue::Single(c)) => self.red = single(c),
+            ("amber", OverrideValue::Single(c)) => self.amber = single(c),
+            ("border", OverrideValue::Single(c)) => self.border = single(c),
+            ("badge_fg", OverrideValue::Single(c)) => self.badge_fg = single(c),
+            ("scrollbar_thumb", OverrideValue::Single(c)) => self.scrollbar_thumb = single(c),
+            ("keycap_fg", OverrideValue::Single(c)) => self.keycap_fg = single(c),
+            ("keycap_bg", OverrideValue::Single(c)) => self.keycap_bg = single(c),
+            ("hint_fg", OverrideValue::Single(c)) => self.hint_fg = single(c),
+            ("logo", OverrideValue::Single(c)) => self.logo = single(c),
+            ("placeholder_fg", OverrideValue::Single(c)) => self.placeholder_fg = single(c),
+            ("rpg_frame", OverrideValue::Single(c)) => self.rpg_frame = single(c),
+            ("rpg_accent", OverrideValue::Single(c)) => self.rpg_accent = single(c),
+            ("rpg_hp", OverrideValue::Single(c)) => self.rpg_hp = single(c),
+            ("rpg_mp", OverrideValue::Single(c)) => self.rpg_mp = single(c),
+            ("rpg_exp", OverrideValue::Single(c)) => self.rpg_exp = single(c),
+            ("rpg_gauge_empty", OverrideValue::Single(c)) => self.rpg_gauge_empty = single(c),
+            ("rpg_gold", OverrideValue::Single(c)) => self.rpg_gold = single(c),
+            ("band_modified", OverrideValue::Pair(n, s)) => {
+                self.band_modified = (single(n), single(s));
+            }
+            ("band_added", OverrideValue::Pair(n, s)) => self.band_added = (single(n), single(s)),
+            ("band_deleted", OverrideValue::Pair(n, s)) => {
+                self.band_deleted = (single(n), single(s));
+            }
+            ("band_conflict", OverrideValue::Pair(n, s)) => {
+                self.band_conflict = (single(n), single(s));
+            }
+            ("emph_modified", OverrideValue::Pair(n, s)) => {
+                self.emph_modified = (single(n), single(s));
+            }
+            ("emph_added", OverrideValue::Pair(n, s)) => self.emph_added = (single(n), single(s)),
+            ("emph_deleted", OverrideValue::Pair(n, s)) => {
+                self.emph_deleted = (single(n), single(s));
+            }
+            ("emph_conflict", OverrideValue::Pair(n, s)) => {
+                self.emph_conflict = (single(n), single(s));
+            }
+            _ => return false,
+        }
+        true
     }
 
     /// Tokyo Night 默认主题。
@@ -299,5 +460,53 @@ mod tests {
         }
         assert!(Theme::select(true).light);
         assert!(!Theme::select(false).light);
+    }
+
+    /// COLOR_FIELDS 中的每个名字都能实际写入;形态不匹配与未知名被拒
+    #[test]
+    fn every_listed_color_is_settable() {
+        let mut theme = Theme::tokyo_night();
+        for (name, is_pair) in COLOR_FIELDS {
+            let (matching, wrong) = if *is_pair {
+                (
+                    OverrideValue::Pair((1, 2, 3), (4, 5, 6)),
+                    OverrideValue::Single((1, 2, 3)),
+                )
+            } else {
+                (
+                    OverrideValue::Single((1, 2, 3)),
+                    OverrideValue::Pair((1, 2, 3), (4, 5, 6)),
+                )
+            };
+            assert!(theme.set_color(name, matching), "{name} 未接线到字段");
+            assert!(!theme.set_color(name, wrong), "{name} 接受了错误形态");
+        }
+        assert!(!theme.set_color("nope", OverrideValue::Single((0, 0, 0))));
+    }
+
+    /// 覆盖校验:合法输入通过;未知名 / 非法 hex / 形态错误给出可读错误
+    #[test]
+    fn validate_rejects_bad_overrides() {
+        let single = |v: &str| ColorValue::Single(v.to_owned());
+        let pair = |a: &str, b: &str| ColorValue::Pair([a.to_owned(), b.to_owned()]);
+
+        let ok = HashMap::from([
+            ("rpg_accent".to_owned(), single("#ff7a2f")),
+            ("band_conflict".to_owned(), pair("#3a1e22", "#5e2d35")),
+        ]);
+        assert_eq!(validate(&ok).unwrap().len(), 2);
+
+        let unknown = HashMap::from([("nope".to_owned(), single("#000000"))]);
+        let err = validate(&unknown).unwrap_err().to_string();
+        assert!(err.contains("nope") && err.contains("rpg_accent"));
+
+        let bad_hex = HashMap::from([("blue".to_owned(), single("#zz0000"))]);
+        assert!(validate(&bad_hex).is_err());
+
+        // 单色字段给了双色对 / 双色字段给了单色
+        let wrong_shape = HashMap::from([("blue".to_owned(), pair("#000000", "#111111"))]);
+        assert!(validate(&wrong_shape).is_err());
+        let wrong_shape = HashMap::from([("band_added".to_owned(), single("#000000"))]);
+        assert!(validate(&wrong_shape).is_err());
     }
 }

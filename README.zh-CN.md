@@ -65,6 +65,27 @@ git-pincer abort                # 中止进行中的合并操作(有确认)
 | `--lang <auto\|zh\|en>` | 界面语言;`auto` 跟随系统 locale(中文环境用中文,其余英文) |
 | `-v, --verbose` | 回显执行的每条 git 命令 |
 
+### 配置文件
+
+可选配置文件位于 `~/.config/git-pincer/config.toml`(遵循 `$XDG_CONFIG_HOME`;Windows 为 `%APPDATA%\git-pincer\config.toml`;环境变量 `GIT_PINCER_CONFIG` 可完全覆盖路径)。命令行参数的优先级始终高于配置文件;文件不存在即用默认值,内容非法则启动时给出可读错误。
+
+```toml
+[ui]                    # 上表全局选项的默认值
+theme = "auto"          # auto | dark | light
+lang = "auto"           # auto | zh | en
+verbose = false
+
+[keys]                  # 重绑按键 —— 替换该动作的全部默认键位
+take-local = "o"
+write = "ctrl+s"        # 修饰键:ctrl+ / alt+ / shift+;命名键:left、up、tab、enter、space、f1-f12 等
+
+[theme.dark]            # 按颜色名覆盖任意颜色([theme.light] 同理)
+rpg_accent = "#ff7a2f"
+band_conflict = ["#3a1e22", "#5e2d35"]   # band_* / emph_* 类颜色为 [普通, 选中] 双色对
+```
+
+可重绑的动作:`take-local`、`take-remote`、`ignore`、`undo`、`undo-file`、`edit`、`apply-all`、`next-change`、`prev-change`、`next-conflict`、`prev-conflict`、`copy-chunk`、`copy-file`、`copy-local`、`copy-remote`、`write`、`next-file`、`fold`、`quit`、`help`。覆盖后的按键会自动同步显示在提示条与帮助浮层中;未知动作名、键位冲突与非法颜色都会在启动时报错并列出全部合法值。
+
 不需要 git 仓库也能试玩 TUI:
 
 ```bash
