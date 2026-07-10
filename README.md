@@ -74,6 +74,7 @@ An optional config file is read from `~/.config/git-pincer/config.toml` (`$XDG_C
 theme = "auto"          # auto | dark | light
 lang = "auto"           # auto | zh | en
 verbose = false
+editor = "nvim"          # editor for the e key; falls back to $VISUAL > $EDITOR > vim > vi (notepad on Windows)
 
 [keys]                  # rebind actions — replaces all default keys of that action
 take-local = "o"

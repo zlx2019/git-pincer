@@ -93,6 +93,7 @@ impl Cli {
         });
         crate::ui::keymap::init(&config.keys)?;
         crate::ui::init_theme_overrides(&config.theme)?;
+        crate::ui::init_editor(config.ui.editor.clone());
 
         let verbose = self.verbose || config.ui.verbose.unwrap_or(false);
         let dir = self.repo.unwrap_or_else(|| PathBuf::from("."));

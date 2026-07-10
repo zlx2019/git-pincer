@@ -74,6 +74,7 @@ git-pincer abort                # 中止进行中的合并操作(有确认)
 theme = "auto"          # auto | dark | light
 lang = "auto"           # auto | zh | en
 verbose = false
+editor = "nvim"          # e 键使用的编辑器;缺省回退 $VISUAL > $EDITOR > vim > vi(Windows 为 notepad)
 
 [keys]                  # 重绑按键 —— 替换该动作的全部默认键位
 take-local = "o"

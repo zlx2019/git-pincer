@@ -42,6 +42,9 @@ pub struct UiSection {
     pub lang: Option<LangArg>,
     /// 是否回显执行的 git 命令
     pub verbose: Option<bool>,
+    /// 块编辑(e 键)使用的编辑器命令,可含参数(如 "code --wait");
+    /// 完整优先级:此处 > $VISUAL > $EDITOR > vim / vi(Windows 为 notepad)
+    pub editor: Option<String>,
 }
 
 /// `[theme]` 段:深 / 浅两套主题的颜色覆盖(颜色名 → 值)。
