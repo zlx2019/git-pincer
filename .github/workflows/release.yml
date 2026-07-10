@@ -8,12 +8,6 @@ on:
   push:
     tags:
       - "v*"
-  # 手动触发: 只执行 npm 发布, 用于给已存在的 Release tag 补发 npm 包
-  workflow_dispatch:
-    inputs:
-      tag:
-        description: "已存在的 Release tag (如 v0.1.2)"
-        required: true
 
 permissions:
   contents: write
@@ -21,7 +15,6 @@ permissions:
 jobs:
   changelog:
     name: Changelog
-    if: github.event_name == 'push'
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
@@ -46,7 +39,7 @@ jobs:
 
   build:
     name: Build ${{ matrix.target }}
-    if: github.event_name == 'push' && github.repository != 'zlx2019/rust-cli-template'
+    if: github.repository != 'zlx2019/rust-cli-template'
     needs: changelog
     runs-on: ${{ matrix.os }}
     strategy:
@@ -117,11 +110,10 @@ jobs:
   publish-npm:
     name: Publish to npm
     needs: build
-    # push: 随发版执行(预发布 tag 除外); workflow_dispatch: build 被跳过仍继续, 用于补发已有 tag
-    if: ${{ !cancelled() && !failure() && (github.event_name == 'workflow_dispatch' || !contains(github.ref_name, '-')) }}
+    if: ${{ !contains(github.ref_name, '-') }}
     runs-on: ubuntu-latest
     env:
-      TAG: ${{ inputs.tag || github.ref_name }}
+      TAG: ${{ github.ref_name }}
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-node@v4
