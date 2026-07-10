@@ -273,6 +273,10 @@ fn pick_loop(
             KeyCode::Char('k') | KeyCode::Up => cursor = wrap_move(cursor, items.len(), -1),
             KeyCode::Enter => return Ok(Some(cursor)),
             KeyCode::Char('q') | KeyCode::Esc => return Ok(None),
+            // Ctrl+C 遵循终端惯例,等价于取消(raw mode 下不产生 SIGINT)
+            KeyCode::Char('c') if key.modifiers.contains(event::KeyModifiers::CONTROL) => {
+                return Ok(None);
+            }
             _ => {}
         }
     }
