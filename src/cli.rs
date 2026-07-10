@@ -73,11 +73,19 @@ pub enum Commands {
     File(commands::file::FileArgs),
     /// Abort the operation in progress (merge / rebase / cherry-pick / revert / am)
     Abort,
+    /// Generate a shell completion script to stdout
+    Completions(commands::completions::CompletionsArgs),
 }
 
 impl Cli {
     /// Distribute and execute the selected subcommands.
     pub fn run(self) -> Result<()> {
+        // 补全脚本生成先于配置加载:它随 shell 启动执行,
+        // 不应被配置文件错误或 git 环境问题阻断
+        if let Some(Commands::Completions(args)) = &self.command {
+            commands::completions::run(args.shell);
+            return Ok(());
+        }
         // --lang 显式指定时最早生效,让配置文件自身的报错也用对语言;
         // i18n::init 首次调用生效,因此调用顺序即优先级:命令行 > 配置 > 系统探测
         match self.lang {
@@ -118,6 +126,8 @@ impl Cli {
             Some(Commands::Revert(args)) => commands::run::revert(args, verbose, &dir, light),
             Some(Commands::File(args)) => commands::file::run(args, light),
             Some(Commands::Abort) => commands::abort::run(verbose, &dir),
+            // 已在配置加载前处理并早退
+            Some(Commands::Completions(_)) => Ok(()),
         }
     }
 }

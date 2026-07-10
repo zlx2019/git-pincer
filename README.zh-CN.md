@@ -54,6 +54,7 @@ git-pincer cherry-pick <commit> # 多提交 / 选项均可透传
 git-pincer revert <commit>      # 执行 git revert 并接管冲突
 git-pincer file conflict.txt    # 免 git:解析带冲突标记的文件,解决后写回
 git-pincer abort                # 中止进行中的合并操作(有确认)
+git-pincer completions zsh      # 生成 shell 补全脚本(bash/zsh/fish/powershell/elvish)
 ```
 
 全局选项:

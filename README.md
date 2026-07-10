@@ -54,6 +54,7 @@ git-pincer cherry-pick <commit> # multiple commits / options are passed through
 git-pincer revert <commit>      # run git revert and take over the conflicts
 git-pincer file conflict.txt    # git-free: parse a conflict-marked file, write it back
 git-pincer abort                # abort the operation in progress (with confirmation)
+git-pincer completions zsh      # shell completion script (bash/zsh/fish/powershell/elvish)
 ```
 
 Global options:
