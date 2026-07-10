@@ -48,6 +48,8 @@ impl TempRepo {
         repo.git(&["config", "user.name", "tester"]);
         repo.git(&["config", "user.email", "tester@example.com"]);
         repo.git(&["config", "commit.gpgsign", "false"]);
+        // Windows runner 默认 autocrlf=true 会改写行尾,固定关闭保证跨平台确定性
+        repo.git(&["config", "core.autocrlf", "false"]);
         repo
     }
 

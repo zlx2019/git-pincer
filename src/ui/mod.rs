@@ -29,7 +29,7 @@ use std::io::IsTerminal;
 
 use anyhow::{Context, Result};
 use ratatui::DefaultTerminal;
-use ratatui::crossterm::event::{self, Event, KeyEventKind};
+use ratatui::crossterm::event::{self, Event, KeyCode, KeyEventKind, KeyModifiers};
 
 use crate::app::{FileEntry, Session, Side};
 use keymap::Action;
@@ -125,7 +125,14 @@ fn event_loop(
             ui.show_help = false;
             continue;
         }
-        let action = keymap::action_for(key.code, key.modifiers);
+        // Ctrl+C 遵循终端惯例等价于退出键(raw mode 下不会产生 SIGINT,
+        // 不处理会让用户以为程序卡死)
+        let action =
+            if key.code == KeyCode::Char('c') && key.modifiers.contains(KeyModifiers::CONTROL) {
+                Some(Action::Quit)
+            } else {
+                keymap::action_for(key.code, key.modifiers)
+            };
         // 除退出键外的任意键(含未绑定键)取消退出确认
         if action != Some(Action::Quit) {
             ui.pending_quit = false;
@@ -273,7 +280,9 @@ fn copy_feedback(lines: &[String], what: &str) -> String {
     }
 }
 
-/// 把文本写入系统剪贴板:依次尝试 pbcopy(macOS)/ xclip(X11)/ wl-copy(Wayland)。
+/// 把文本写入系统剪贴板:依次尝试 pbcopy(macOS)/ xclip(X11)/ wl-copy(Wayland),
+/// 都不可用时退回 OSC 52 转义序列——由终端代写剪贴板,覆盖 Windows、
+/// SSH 与无剪贴板工具的最小化环境(终端不支持该序列时静默无效)。
 fn copy_to_clipboard(text: &str) -> Result<()> {
     use std::io::Write as _;
     use std::process::{Command, Stdio};
@@ -300,7 +309,39 @@ fn copy_to_clipboard(text: &str) -> Result<()> {
             return Ok(());
         }
     }
-    anyhow::bail!("{}", tr("ui.no_clipboard"))
+    osc52_copy(text)
+}
+
+/// 通过 OSC 52 序列请求终端写入剪贴板。
+fn osc52_copy(text: &str) -> Result<()> {
+    use std::io::Write as _;
+    let mut out = std::io::stdout();
+    write!(out, "\x1b]52;c;{}\x07", base64(text.as_bytes()))?;
+    out.flush()?;
+    Ok(())
+}
+
+/// 标准 base64 编码(仅编码一个用途,不值得为此引入依赖)。
+fn base64(data: &[u8]) -> String {
+    const TABLE: &[u8; 64] = b"ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/";
+    let mut out = String::with_capacity(data.len().div_ceil(3) * 4);
+    for chunk in data.chunks(3) {
+        let bytes = [
+            chunk[0],
+            *chunk.get(1).unwrap_or(&0),
+            *chunk.get(2).unwrap_or(&0),
+        ];
+        let n = (u32::from(bytes[0]) << 16) | (u32::from(bytes[1]) << 8) | u32::from(bytes[2]);
+        let sextets = [(n >> 18) & 63, (n >> 12) & 63, (n >> 6) & 63, n & 63];
+        for (i, sextet) in sextets.iter().enumerate() {
+            if i <= chunk.len() {
+                out.push(TABLE[*sextet as usize] as char);
+            } else {
+                out.push('=');
+            }
+        }
+    }
+    out
 }
 
 /// 写盘当前文件;成功返回 true。
@@ -339,7 +380,8 @@ fn write_current(
 
 /// 调起 $EDITOR 编辑一段内容;返回 None 表示用户取消(编辑器非零退出)。
 fn edit_lines(terminal: &mut DefaultTerminal, initial: &[String]) -> Result<Option<Vec<String>>> {
-    let editor = std::env::var("EDITOR").unwrap_or_else(|_| "vi".to_owned());
+    let editor = std::env::var("EDITOR")
+        .unwrap_or_else(|_| if cfg!(windows) { "notepad" } else { "vi" }.to_owned());
     let mut parts = editor.split_whitespace();
     let program = parts.next().unwrap_or("vi").to_owned();
     let args: Vec<&str> = parts.collect();
@@ -375,6 +417,22 @@ fn edit_lines(terminal: &mut DefaultTerminal, initial: &[String]) -> Result<Opti
 mod tests {
     use super::*;
     use crate::app::FileMerge;
+
+    /// base64 编码与标准向量一致(OSC 52 载荷用)
+    #[test]
+    fn base64_matches_known_vectors() {
+        for (input, expected) in [
+            ("", ""),
+            ("f", "Zg=="),
+            ("fo", "Zm8="),
+            ("foo", "Zm9v"),
+            ("foob", "Zm9vYg=="),
+            ("hello", "aGVsbG8="),
+            ("多字节✓", "5aSa5a2X6IqC4pyT"),
+        ] {
+            assert_eq!(base64(input.as_bytes()), expected, "输入: {input:?}");
+        }
+    }
 
     /// 回归:写盘时未处理的非冲突改动应自动应用,而非退回 base
     /// (否则会悄悄丢掉 git 已自动合并进来的对侧改动)
