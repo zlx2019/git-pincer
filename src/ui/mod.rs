@@ -83,17 +83,16 @@ pub fn run_session(
 
 /// 在移交的终端现场上运行交互会话(菜单转入冲突解决时复用,
 /// 全程不退出 alternate screen,避免闪屏);结束时恢复终端。
+///
+/// 不做预清屏:ratatui 按缓冲差量重绘,首帧一次性覆盖上一页,
+/// 中间不出现空白闪帧。
 pub(crate) fn run_session_in(
     mut terminal: DefaultTerminal,
     session: &mut Session,
     write_file: &mut dyn FnMut(&str, &[u8]) -> Result<()>,
     light: bool,
 ) -> Result<Outcome> {
-    // 清屏强制全量重绘,抹掉上一页(菜单等待页)的残留
-    let result = terminal
-        .clear()
-        .map_err(Into::into)
-        .and_then(|()| event_loop(&mut terminal, session, write_file, light));
+    let result = event_loop(&mut terminal, session, write_file, light);
     ratatui::restore();
     result
 }

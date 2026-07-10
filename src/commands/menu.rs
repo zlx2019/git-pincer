@@ -15,6 +15,11 @@ use super::run;
 /// 提交选择器最多展示的提交数。
 const COMMIT_LIMIT: usize = 50;
 
+/// 「执行中」等待页的延迟阈值:命令超过该时长仍未结束才切换等待页。
+/// 本地快命令(merge / revert 等)直接出结果,避免等待页一闪而过;
+/// 慢命令(如需要网络的 pull)照常获得执行反馈。
+const FLASH_DELAY: std::time::Duration = std::time::Duration::from_millis(150);
+
 /// 运行裸命令入口:接管现场或进入菜单。
 pub fn run(verbose: bool, dir: &Path, light: bool) -> Result<()> {
     let git = Git::discover(dir, verbose)?;
@@ -120,10 +125,26 @@ fn menu_loop(git: &Git, light: bool) -> Result<()> {
                     }
                 }
             };
-            // 会话内捕获执行:成功 / 失败都弹框反馈后回到一级菜单,全程不退出 TUI
-            session.flash(&format!("$ git {}", cmd.join(" ")))?;
-            let refs: Vec<&str> = cmd.iter().map(String::as_str).collect();
-            match run::launch_captured(git, &refs)? {
+            // 会话内捕获执行:成功 / 失败都弹框反馈后回到一级菜单,全程不退出 TUI。
+            // 命令放到后台线程执行,超过 FLASH_DELAY 仍未结束才显示「执行中」页
+            let outcome = {
+                let refs: Vec<&str> = cmd.iter().map(String::as_str).collect();
+                let (tx, rx) = std::sync::mpsc::channel();
+                std::thread::scope(|scope| -> Result<run::LaunchOutcome> {
+                    scope.spawn(move || {
+                        let _ = tx.send(run::launch_captured(git, &refs));
+                    });
+                    match rx.recv_timeout(FLASH_DELAY) {
+                        Ok(result) => result,
+                        Err(_) => {
+                            session.flash(&format!("$ git {}", cmd.join(" ")))?;
+                            rx.recv()
+                                .map_err(|_| anyhow::anyhow!("git worker disconnected"))?
+                        }
+                    }
+                })?
+            };
+            match outcome {
                 run::LaunchOutcome::Failed(reason) => {
                     session.notice(&tr_f("menu.failed", &[("cmd", &cmd[0])]), &reason)?;
                 }
