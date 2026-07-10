@@ -378,10 +378,15 @@ fn write_current(
     Ok(true)
 }
 
-/// 调起 $EDITOR 编辑一段内容;返回 None 表示用户取消(编辑器非零退出)。
+/// 调起编辑器编辑一段内容;返回 None 表示用户取消(编辑器非零退出)。
+///
+/// 编辑器按 Unix 惯例优先级选择:`$VISUAL` > `$EDITOR` >
+/// 平台缺省(Unix 为 vi,Windows 为 notepad);空值视同未设置。
 fn edit_lines(terminal: &mut DefaultTerminal, initial: &[String]) -> Result<Option<Vec<String>>> {
-    let editor = std::env::var("EDITOR")
-        .unwrap_or_else(|_| if cfg!(windows) { "notepad" } else { "vi" }.to_owned());
+    let editor = ["VISUAL", "EDITOR"]
+        .iter()
+        .find_map(|var| std::env::var(var).ok().filter(|v| !v.trim().is_empty()))
+        .unwrap_or_else(|| if cfg!(windows) { "notepad" } else { "vi" }.to_owned());
     let mut parts = editor.split_whitespace();
     let program = parts.next().unwrap_or("vi").to_owned();
     let args: Vec<&str> = parts.collect();
