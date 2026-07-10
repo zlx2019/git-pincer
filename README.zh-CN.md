@@ -37,6 +37,12 @@
 cargo install git-pincer
 ```
 
+也可以通过 npm 安装(预编译二进制,无需 Rust 工具链):
+
+```bash
+npm install -g git-pincer
+```
+
 主流平台的预编译二进制也会附在 [GitHub Releases](https://github.com/zlx2019/git-pincer/releases);源码构建(Rust 1.96+):
 
 ```bash

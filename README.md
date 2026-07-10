@@ -37,6 +37,12 @@ Requires `git` on your `PATH`.
 cargo install git-pincer
 ```
 
+Or via npm (prebuilt binary, no Rust toolchain needed):
+
+```bash
+npm install -g git-pincer
+```
+
 Prebuilt binaries for major platforms are also attached to [GitHub Releases](https://github.com/zlx2019/git-pincer/releases). To build from source (Rust 1.96+):
 
 ```bash
