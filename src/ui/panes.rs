@@ -220,7 +220,8 @@ fn pane_fg(pane: Option<&PaneSyntax>, no: usize) -> &[(Color, Range<usize>)] {
 /// 三列正文;根据光标调整滚动位置并写回,跨帧保持视口稳定。
 ///
 /// 渲染行由 [`RowCache`](super::rows::RowCache) 提供(纯导航按键零重建),
-/// 光标所在块在此处用 `row.chunk` 现比。
+/// 光标所在块在此处用 `row.chunk` 现比;`scroll_request` 为待结算的
+/// 手动滚动量(半页为单位),消费后视口脱离光标跟随。
 pub(crate) fn draw_columns(
     frame: &mut Frame,
     area: Rect,
@@ -228,16 +229,28 @@ pub(crate) fn draw_columns(
     theme: &Theme,
     highlight: &FileHighlight,
     (rows, chunk_starts, max_no): (&[Row], &[usize], usize),
+    scroll_request: &mut isize,
 ) {
     // 上下边框各占一行
     let height = (area.height as usize).saturating_sub(2);
     let max_scroll = rows.len().saturating_sub(height);
 
-    // 光标块在视口内则不动;跳出视口时把块首行定位到约 1/3 处,
+    // 结算手动滚动:半页步长按当前视口高度换算,滚动后脱离跟随
+    if *scroll_request != 0 {
+        let step = (height / 2).max(1) as isize;
+        merge.scroll = merge
+            .scroll
+            .saturating_add_signed(*scroll_request * step)
+            .min(max_scroll);
+        merge.follow = false;
+        *scroll_request = 0;
+    }
+
+    // 跟随模式下:光标块在视口内则不动;跳出视口时把块首行定位到约 1/3 处,
     // 让上方留出上下文、下方能看到块的内容
     let target = chunk_starts.get(merge.cursor).copied().unwrap_or(0);
     let mut scroll = merge.scroll.min(max_scroll);
-    if height > 0 && (target < scroll || target >= scroll + height) {
+    if merge.follow && height > 0 && (target < scroll || target >= scroll + height) {
         scroll = target.saturating_sub(height / 3).min(max_scroll);
     }
     merge.scroll = scroll;
