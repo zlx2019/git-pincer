@@ -4,6 +4,13 @@
 //! and can also launch `merge / rebase / pull / cherry-pick / revert` directly,
 //! taking over the whole conflict-resolution flow that follows.
 //!
+//! # Stability
+//!
+//! The product of this crate is the `git-pincer` **CLI**; semantic versioning
+//! applies to the command-line interface and its behavior. The library
+//! modules below are exposed for internal organization and testing — their
+//! APIs may change between minor versions without notice.
+//!
 //! Module overview:
 //! - [`merge`][] — diff3 three-way merge core and conflict-marker parsing (pure logic, ported from toolkit-rs)
 //! - [`git`][] — thin wrapper around the native git CLI (shell out; inherits all user config)

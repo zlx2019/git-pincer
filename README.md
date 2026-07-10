@@ -5,6 +5,7 @@
 # git-pincer
 
 [![CI](https://github.com/zlx2019/git-pincer/actions/workflows/ci.yml/badge.svg)](https://github.com/zlx2019/git-pincer/actions/workflows/ci.yml)
+[![crates.io](https://img.shields.io/crates/v/git-pincer.svg)](https://crates.io/crates/git-pincer)
 [![License: MIT](https://img.shields.io/badge/license-MIT-blue.svg)](./LICENSE)
 [![Rust](https://img.shields.io/badge/rust-1.96.0%2B-orange.svg)](https://www.rust-lang.org)
 
@@ -54,7 +55,10 @@ git-pincer cherry-pick <commit> # multiple commits / options are passed through
 git-pincer revert <commit>      # run git revert and take over the conflicts
 git-pincer file conflict.txt    # git-free: parse a conflict-marked file, write it back
 git-pincer abort                # abort the operation in progress (with confirmation)
+git-pincer completions zsh      # shell completion script (bash/zsh/fish/powershell/elvish)
 ```
+
+Tab completion needs a one-time hook into your shell, e.g. `echo 'eval "$(git-pincer completions zsh)"' >> ~/.zshrc` (bash: `~/.bashrc`; fish: `git-pincer completions fish > ~/.config/fish/completions/git-pincer.fish`).
 
 Global options:
 

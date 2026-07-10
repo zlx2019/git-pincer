@@ -5,6 +5,7 @@
 # git-pincer
 
 [![CI](https://github.com/zlx2019/git-pincer/actions/workflows/ci.yml/badge.svg)](https://github.com/zlx2019/git-pincer/actions/workflows/ci.yml)
+[![crates.io](https://img.shields.io/crates/v/git-pincer.svg)](https://crates.io/crates/git-pincer)
 [![License: MIT](https://img.shields.io/badge/license-MIT-blue.svg)](./LICENSE)
 [![Rust](https://img.shields.io/badge/rust-1.96.0%2B-orange.svg)](https://www.rust-lang.org)
 
@@ -54,7 +55,10 @@ git-pincer cherry-pick <commit> # 多提交 / 选项均可透传
 git-pincer revert <commit>      # 执行 git revert 并接管冲突
 git-pincer file conflict.txt    # 免 git:解析带冲突标记的文件,解决后写回
 git-pincer abort                # 中止进行中的合并操作(有确认)
+git-pincer completions zsh      # 生成 shell 补全脚本(bash/zsh/fish/powershell/elvish)
 ```
+
+Tab 补全需要一次性接入你的 shell,如 `echo 'eval "$(git-pincer completions zsh)"' >> ~/.zshrc`(bash 写入 `~/.bashrc`;fish 用 `git-pincer completions fish > ~/.config/fish/completions/git-pincer.fish`)。
 
 全局选项:
 
