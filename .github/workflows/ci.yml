@@ -32,10 +32,16 @@ jobs:
         run: cargo clippy --all-targets --all-features -- -D warnings
 
   # 单元测试与集成测试（使用 nextest）
+  # 覆盖 Release 发布的三个平台家族，Windows/macOS 特有路径（剪贴板、
+  # 编辑器回退、配置路径、CRLF）不再只靠交叉编译裸检查
   test:
-    name: Test
+    name: Test ${{ matrix.os }}
     if: github.repository != 'zlx2019/rust-cli-template'
-    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, macos-latest, windows-latest]
+    runs-on: ${{ matrix.os }}
     steps:
       - uses: actions/checkout@v4
       - uses: actions-rust-lang/setup-rust-toolchain@v1
