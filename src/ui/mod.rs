@@ -57,7 +57,10 @@ pub struct UiState {
     pub(crate) theme: theme::Theme,
     /// 高亮信息缓存(词级强调 / 语法高亮)
     pub(crate) cache: highlight::HighlightCache,
-    /// 状态修订号:改动合并内容的按键后自增,用于结果栏语法高亮的失效重算
+    /// 渲染行缓存(纯导航按键零重建)
+    pub(crate) rows: rows::RowCache,
+    /// 状态修订号:改动合并内容的按键后自增,用于结果栏语法高亮与
+    /// 渲染行缓存的失效重算
     pub(crate) revision: u64,
 }
 
