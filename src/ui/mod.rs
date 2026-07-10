@@ -378,15 +378,17 @@ fn write_current(
     Ok(true)
 }
 
+/// 配置文件指定的编辑器(`[ui] editor`;进程内 init 一次)。
+static CONFIG_EDITOR: std::sync::OnceLock<Option<String>> = std::sync::OnceLock::new();
+
+/// 应用配置的编辑器设定(进程内仅首次调用生效,应在进 TUI 前调用)。
+pub(crate) fn init_editor(editor: Option<String>) {
+    let _ = CONFIG_EDITOR.set(editor);
+}
+
 /// 调起编辑器编辑一段内容;返回 None 表示用户取消(编辑器非零退出)。
-///
-/// 编辑器按 Unix 惯例优先级选择:`$VISUAL` > `$EDITOR` >
-/// 平台缺省(Unix 为 vi,Windows 为 notepad);空值视同未设置。
 fn edit_lines(terminal: &mut DefaultTerminal, initial: &[String]) -> Result<Option<Vec<String>>> {
-    let editor = ["VISUAL", "EDITOR"]
-        .iter()
-        .find_map(|var| std::env::var(var).ok().filter(|v| !v.trim().is_empty()))
-        .unwrap_or_else(|| if cfg!(windows) { "notepad" } else { "vi" }.to_owned());
+    let editor = resolve_editor();
     let mut parts = editor.split_whitespace();
     let program = parts.next().unwrap_or("vi").to_owned();
     let args: Vec<&str> = parts.collect();
@@ -418,10 +420,83 @@ fn edit_lines(terminal: &mut DefaultTerminal, initial: &[String]) -> Result<Opti
     }))
 }
 
+/// 依优先级选择编辑器:配置 `[ui].editor` > `$VISUAL` > `$EDITOR` >
+/// 平台缺省;空值视同未设置。Unix 缺省在 PATH 上依次探测 vim、vi
+/// (都不存在时仍回退 vi,让启动失败给出可读错误),Windows 用 notepad。
+fn resolve_editor() -> String {
+    let config = CONFIG_EDITOR.get().and_then(|e| e.as_deref());
+    let visual = std::env::var("VISUAL").ok();
+    let editor = std::env::var("EDITOR").ok();
+    pick_editor(config, visual.as_deref(), editor.as_deref(), on_path)
+}
+
+/// 编辑器选择的纯逻辑部分(便于测试)。
+fn pick_editor(
+    config: Option<&str>,
+    visual: Option<&str>,
+    editor: Option<&str>,
+    exists: impl Fn(&str) -> bool,
+) -> String {
+    let non_empty = |v: Option<&str>| {
+        v.map(str::trim)
+            .filter(|v| !v.is_empty())
+            .map(str::to_owned)
+    };
+    if let Some(chosen) = non_empty(config)
+        .or_else(|| non_empty(visual))
+        .or_else(|| non_empty(editor))
+    {
+        return chosen;
+    }
+    if cfg!(windows) {
+        return "notepad".to_owned();
+    }
+    for candidate in ["vim", "vi"] {
+        if exists(candidate) {
+            return candidate.to_owned();
+        }
+    }
+    "vi".to_owned()
+}
+
+/// 探测某个可执行文件是否存在于 PATH。
+fn on_path(program: &str) -> bool {
+    let Some(paths) = std::env::var_os("PATH") else {
+        return false;
+    };
+    std::env::split_paths(&paths).any(|dir| dir.join(program).is_file())
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
     use crate::app::FileMerge;
+
+    /// 编辑器选择优先级:配置 > VISUAL > EDITOR > vim > vi;空值视同未设置
+    #[test]
+    #[cfg(not(windows))]
+    fn editor_priority_chain() {
+        let both = |_: &str| true;
+        let none = |_: &str| false;
+        let only_vi = |p: &str| p == "vi";
+
+        // 配置最优先;空白配置视同未设置
+        assert_eq!(
+            pick_editor(Some("code --wait"), Some("nvim"), Some("nano"), both),
+            "code --wait"
+        );
+        assert_eq!(
+            pick_editor(Some("  "), Some("nvim"), Some("nano"), both),
+            "nvim"
+        );
+        // VISUAL 优先于 EDITOR
+        assert_eq!(pick_editor(None, Some("nvim"), Some("nano"), both), "nvim");
+        assert_eq!(pick_editor(None, None, Some("nano"), both), "nano");
+        // 全部未设置:PATH 上 vim 优先,退化到 vi;都没有仍回退 vi
+        assert_eq!(pick_editor(None, None, None, both), "vim");
+        assert_eq!(pick_editor(None, None, None, only_vi), "vi");
+        assert_eq!(pick_editor(None, None, None, none), "vi");
+    }
 
     /// base64 编码与标准向量一致(OSC 52 载荷用)
     #[test]
