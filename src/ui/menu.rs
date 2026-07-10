@@ -163,10 +163,11 @@ fn wrap_move(cursor: usize, len: usize, delta: isize) -> usize {
 /// 一次连续的菜单 TUI 会话:多级选择页与弹框共享同一终端现场。
 ///
 /// 页面切换只清屏重绘,不反复进出 alternate screen,避免闪屏;
-/// Drop 时恢复终端,因此执行需要透传输出的 git 命令前应先结束会话。
+/// Drop 时恢复终端。转入冲突解决界面时用 [`Self::into_terminal`]
+/// 移交终端所有权,同样保持现场不闪屏。
 pub(crate) struct MenuSession {
-    /// 会话持有的终端(Drop 时统一恢复)
-    terminal: ratatui::DefaultTerminal,
+    /// 会话持有的终端;None 表示所有权已移交,Drop 不再恢复
+    terminal: Option<ratatui::DefaultTerminal>,
     /// 界面主题
     theme: Theme,
 }
@@ -178,9 +179,18 @@ impl MenuSession {
             anyhow::bail!("{}", tr("common.need_tty_menu"));
         }
         Ok(Self {
-            terminal: ratatui::init(),
+            terminal: Some(ratatui::init()),
             theme: Theme::select(light),
         })
+    }
+
+    /// 移交终端所有权(转入冲突解决界面时复用现场,避免退出
+    /// alternate screen 造成的闪屏);此后 Drop 不再恢复终端,
+    /// 恢复责任转移给接收方。
+    pub(crate) fn into_terminal(mut self) -> Result<ratatui::DefaultTerminal> {
+        self.terminal
+            .take()
+            .ok_or_else(|| anyhow::anyhow!("menu session already handed over the terminal"))
     }
 
     /// 运行单选列表页;返回选中项下标,None 表示取消(q / Esc)或列表为空。
@@ -196,38 +206,41 @@ impl MenuSession {
         if items.is_empty() {
             return Ok(None);
         }
+        let Some(terminal) = self.terminal.as_mut() else {
+            anyhow::bail!("menu session already handed over the terminal");
+        };
         // 清屏强制全量重绘,抹掉上一页的残留(各页面板尺寸不同)
-        self.terminal.clear()?;
-        pick_loop(
-            &mut self.terminal,
-            title,
-            items,
-            vitals,
-            initial,
-            &self.theme,
-        )
+        terminal.clear()?;
+        pick_loop(terminal, title, items, vitals, initial, &self.theme)
     }
 
     /// 展示消息弹框(如失败原因),任意键关闭。
     pub(crate) fn notice(&mut self, title: &str, body: &str) -> Result<()> {
-        self.terminal.clear()?;
-        notice_loop(&mut self.terminal, title, body, &self.theme)
+        let Some(terminal) = self.terminal.as_mut() else {
+            anyhow::bail!("menu session already handed over the terminal");
+        };
+        terminal.clear()?;
+        notice_loop(terminal, title, body, &self.theme)
     }
 
     /// 绘制一帧「命令执行中」等待页后立即返回(不等待按键),
     /// 供随后的阻塞操作(如需要网络的 git 命令)期间维持画面反馈。
     pub(crate) fn flash(&mut self, cmd_line: &str) -> Result<()> {
-        self.terminal.clear()?;
+        let Some(terminal) = self.terminal.as_mut() else {
+            anyhow::bail!("menu session already handed over the terminal");
+        };
+        terminal.clear()?;
         let theme = &self.theme;
-        self.terminal
-            .draw(|frame| draw_flash(frame, cmd_line, theme))?;
+        terminal.draw(|frame| draw_flash(frame, cmd_line, theme))?;
         Ok(())
     }
 }
 
 impl Drop for MenuSession {
     fn drop(&mut self) {
-        ratatui::restore();
+        if self.terminal.is_some() {
+            ratatui::restore();
+        }
     }
 }
 

@@ -78,8 +78,22 @@ pub fn run_session(
     if !std::io::stdout().is_terminal() {
         anyhow::bail!("{}", tr("common.need_tty_resolve"));
     }
-    let mut terminal = ratatui::init();
-    let result = event_loop(&mut terminal, session, write_file, light);
+    run_session_in(ratatui::init(), session, write_file, light)
+}
+
+/// 在移交的终端现场上运行交互会话(菜单转入冲突解决时复用,
+/// 全程不退出 alternate screen,避免闪屏);结束时恢复终端。
+pub(crate) fn run_session_in(
+    mut terminal: DefaultTerminal,
+    session: &mut Session,
+    write_file: &mut dyn FnMut(&str, &[u8]) -> Result<()>,
+    light: bool,
+) -> Result<Outcome> {
+    // 清屏强制全量重绘,抹掉上一页(菜单等待页)的残留
+    let result = terminal
+        .clear()
+        .map_err(Into::into)
+        .and_then(|()| event_loop(&mut terminal, session, write_file, light));
     ratatui::restore();
     result
 }
