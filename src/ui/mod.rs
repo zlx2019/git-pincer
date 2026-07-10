@@ -9,6 +9,7 @@
 //!
 //! 模块拆分:
 //! - [`theme`][] — 颜色集中定义
+//! - [`keymap`][] — 按键绑定的单一事实来源(分发 / 提示条 / 帮助共用)
 //! - [`rows`][] — 渲染行数据结构与构建(折叠 / 占位)
 //! - [`highlight`][] — 词级强调与语法高亮的计算与缓存
 //! - [`panes`][] — 三栏正文渲染
@@ -17,6 +18,7 @@
 
 mod chrome;
 mod highlight;
+mod keymap;
 mod menu;
 mod panes;
 mod rows;
@@ -27,9 +29,10 @@ use std::io::IsTerminal;
 
 use anyhow::{Context, Result};
 use ratatui::DefaultTerminal;
-use ratatui::crossterm::event::{self, Event, KeyCode, KeyEventKind};
+use ratatui::crossterm::event::{self, Event, KeyEventKind};
 
 use crate::app::{FileEntry, Session, Side};
+use keymap::Action;
 
 pub use chrome::draw;
 pub(crate) use menu::{MenuItem, MenuSession};
@@ -122,24 +125,28 @@ fn event_loop(
             ui.show_help = false;
             continue;
         }
-        // 除 q 外的任意键取消退出确认
-        if key.code != KeyCode::Char('q') {
+        let action = keymap::action_for(key.code);
+        // 除退出键外的任意键(含未绑定键)取消退出确认
+        if action != Some(Action::Quit) {
             ui.pending_quit = false;
         }
         ui.message.clear();
+        let Some(action) = action else {
+            continue;
+        };
 
-        match key.code {
-            KeyCode::Char('q') => {
+        match action {
+            Action::Quit => {
                 if session.all_written() || ui.pending_quit {
                     return Ok(Outcome::Quit);
                 }
                 ui.pending_quit = true;
                 ui.message = tr("ui.quit_confirm").to_owned();
             }
-            KeyCode::Char('?') => ui.show_help = true,
-            KeyCode::Tab => session.next_file(),
-            KeyCode::Char('z') => session.folded = !session.folded,
-            KeyCode::Char('w') => {
+            Action::Help => ui.show_help = true,
+            Action::NextFile => session.next_file(),
+            Action::ToggleFold => session.folded = !session.folded,
+            Action::WriteFile => {
                 if write_current(session, write_file, &mut ui)? {
                     // 写盘会自动应用非冲突改动,结果栏内容可能变化
                     ui.revision += 1;
@@ -148,7 +155,7 @@ fn event_loop(
                     }
                 }
             }
-            KeyCode::Char('e') => {
+            Action::EditChunk => {
                 if let FileEntry::Text(merge) = session.current_file_mut() {
                     let initial = merge.current_content(merge.cursor);
                     if let Some(lines) = edit_lines(terminal, &initial)? {
@@ -160,8 +167,8 @@ fn event_loop(
                     }
                 }
             }
-            code => {
-                if handle_file_key(session, code, &mut ui) {
+            other => {
+                if handle_file_key(session, other, &mut ui) {
                     ui.revision += 1;
                 }
             }
@@ -169,74 +176,74 @@ fn event_loop(
     }
 }
 
-/// 处理作用于当前文件的普通按键;返回是否改动了合并内容(结果栏高亮失效用)。
-fn handle_file_key(session: &mut Session, code: KeyCode, ui: &mut UiState) -> bool {
+/// 处理作用于当前文件的普通动作;返回是否改动了合并内容(结果栏高亮失效用)。
+fn handle_file_key(session: &mut Session, action: Action, ui: &mut UiState) -> bool {
     match session.current_file_mut() {
-        FileEntry::Text(merge) => match code {
-            KeyCode::Char('h') | KeyCode::Left => {
+        FileEntry::Text(merge) => match action {
+            Action::TakeLocal => {
                 merge.apply(Side::Ours);
                 true
             }
-            KeyCode::Char('l') | KeyCode::Right => {
+            Action::TakeRemote => {
                 merge.apply(Side::Theirs);
                 true
             }
-            // x = 忽略当前块所有仍待处理的侧(已取用的内容保留)
-            KeyCode::Char('x') => {
+            // 忽略当前块所有仍待处理的侧(已取用的内容保留)
+            Action::IgnoreChunk => {
                 merge.ignore(Side::Ours);
                 merge.ignore(Side::Theirs);
                 true
             }
-            KeyCode::Char('u') => {
+            Action::UndoChunk => {
                 merge.undo();
                 true
             }
-            KeyCode::Char('U') => {
+            Action::UndoFile => {
                 merge.undo_all();
                 ui.message = tr("ui.undone_all").to_owned();
                 true
             }
-            KeyCode::Char('a') => {
+            Action::ApplyNonConflict => {
                 merge.apply_all_nonconflict();
                 ui.message = tr("ui.applied_all").to_owned();
                 true
             }
-            KeyCode::Char('j') | KeyCode::Down => {
+            Action::NextChange => {
                 merge.next_change();
                 false
             }
-            KeyCode::Char('k') | KeyCode::Up => {
+            Action::PrevChange => {
                 merge.prev_change();
                 false
             }
-            KeyCode::Char('n') => {
+            Action::NextConflict => {
                 merge.next_conflict();
                 false
             }
-            KeyCode::Char('p') => {
+            Action::PrevConflict => {
                 merge.prev_conflict();
                 false
             }
-            // 复制键(终端框选会横跨三栏,复制键绕开这个限制):
-            // y 块结果 / Y 整个文件结果 / H 块本地侧 / L 块远端侧
-            KeyCode::Char('y') => {
+            // 复制动作(终端框选会横跨三栏,复制键绕开这个限制):
+            // 块结果 / 整个文件结果 / 块本地侧 / 块远端侧
+            Action::CopyChunk => {
                 let lines = merge.current_content(merge.cursor);
                 ui.message = copy_feedback(&lines, tr("ui.copy_chunk"));
                 false
             }
-            KeyCode::Char('Y') => {
+            Action::CopyFile => {
                 ui.message = match copy_to_clipboard(&merge.resolved_content()) {
                     Ok(()) => tr("ui.copied_file").to_owned(),
                     Err(e) => tr_f("ui.copy_failed", &[("e", &e.to_string())]),
                 };
                 false
             }
-            KeyCode::Char('H') => {
+            Action::CopyLocal => {
                 let lines = merge.chunks[merge.cursor].ours_lines().to_vec();
                 ui.message = copy_feedback(&lines, tr("ui.copy_local"));
                 false
             }
-            KeyCode::Char('L') => {
+            Action::CopyRemote => {
                 let lines = merge.chunks[merge.cursor].theirs_lines().to_vec();
                 ui.message = copy_feedback(&lines, tr("ui.copy_remote"));
                 false
@@ -244,10 +251,10 @@ fn handle_file_key(session: &mut Session, code: KeyCode, ui: &mut UiState) -> bo
             _ => false,
         },
         FileEntry::Binary { choice, .. } => {
-            match code {
-                KeyCode::Char('h') | KeyCode::Left => *choice = Some(Side::Ours),
-                KeyCode::Char('l') | KeyCode::Right => *choice = Some(Side::Theirs),
-                KeyCode::Char('u') | KeyCode::Char('U') => *choice = None,
+            match action {
+                Action::TakeLocal => *choice = Some(Side::Ours),
+                Action::TakeRemote => *choice = Some(Side::Theirs),
+                Action::UndoChunk | Action::UndoFile => *choice = None,
                 _ => {}
             }
             false

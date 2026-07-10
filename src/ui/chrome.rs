@@ -229,55 +229,23 @@ fn keycap(key: &str, theme: &Theme) -> Span<'static> {
     )
 }
 
-/// 底部按键提示条(键帽 + 描述)。
+/// 底部按键提示条(键帽 + 描述),条目来自 [`keymap`](super::keymap) 单一绑定表。
 fn draw_hints(frame: &mut Frame, area: Rect, theme: &Theme) {
-    let items: [(&str, &str); 11] = [
-        ("h", tr("ui.hint_left")),
-        ("l", tr("ui.hint_right")),
-        ("x", tr("ui.hint_ignore")),
-        ("u/U", tr("ui.hint_undo")),
-        ("e", tr("ui.hint_edit")),
-        ("n/p", tr("ui.hint_conflict")),
-        ("w", tr("ui.hint_write")),
-        ("⇥", tr("ui.hint_file")),
-        ("z", tr("ui.hint_fold")),
-        ("q", tr("ui.hint_quit")),
-        ("?", tr("ui.hint_help")),
-    ];
     let mut spans = vec![Span::raw(" ")];
-    for (key, desc) in items {
+    for (key, desc) in super::keymap::hint_entries() {
         spans.push(keycap(key, theme));
         spans.push(Span::styled(
-            format!(" {desc}  "),
+            format!(" {}  ", tr(desc)),
             Style::new().fg(theme.hint_fg),
         ));
     }
     frame.render_widget(Paragraph::new(Line::from(spans)), area);
 }
 
-/// 帮助浮层:圆角边框 + 双栏按键布局。
+/// 帮助浮层:圆角边框 + 双栏按键布局,条目来自 [`keymap`](super::keymap) 单一绑定表。
 fn draw_help(frame: &mut Frame, theme: &Theme) {
-    let left_items: [(&str, &str); 8] = [
-        ("h / ←", tr("ui.help_left")),
-        ("l / →", tr("ui.help_right")),
-        ("x", tr("ui.help_ignore")),
-        ("u / U", tr("ui.help_undo")),
-        ("e", tr("ui.help_edit")),
-        ("a", tr("ui.help_apply")),
-        ("w", tr("ui.help_write")),
-        ("q", tr("ui.help_quit")),
-    ];
-    let right_items: [(&str, &str); 8] = [
-        ("j / k", tr("ui.help_move")),
-        ("n / p", tr("ui.help_jump")),
-        ("Tab", tr("ui.help_tab")),
-        ("z", tr("ui.help_fold")),
-        ("y", tr("ui.help_copy_chunk")),
-        ("Y", tr("ui.help_copy_file")),
-        ("H / L", tr("ui.help_copy_sides")),
-        ("?", tr("ui.help_help")),
-    ];
-    let column = |entries: &[(&str, &str)]| -> Vec<Line<'static>> {
+    let (left_items, right_items) = super::keymap::help_columns();
+    let column = |entries: &[(&'static str, &'static str)]| -> Vec<Line<'static>> {
         entries
             .iter()
             .map(|(key, desc)| {
@@ -286,7 +254,7 @@ fn draw_help(frame: &mut Frame, theme: &Theme) {
                         format!(" {key:<7}"),
                         Style::new().fg(theme.blue).add_modifier(Modifier::BOLD),
                     ),
-                    Span::raw((*desc).to_owned()),
+                    Span::raw(tr(desc).to_owned()),
                 ])
             })
             .collect()
