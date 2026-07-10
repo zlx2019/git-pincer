@@ -16,13 +16,13 @@ use std::sync::OnceLock;
 use ratatui::style::Color;
 use similar::utils::diff_words;
 use similar::{Algorithm, ChangeTag, DiffTag, capture_diff_slices};
-use syntect::easy::HighlightLines;
 use syntect::highlighting::{
-    Color as SyntectColor, ScopeSelectors, StyleModifier, Theme as SyntectTheme, ThemeItem,
+    Color as SyntectColor, HighlightIterator, HighlightState, Highlighter, ScopeSelectors,
+    StyleModifier, Theme as SyntectTheme, ThemeItem,
 };
-use syntect::parsing::{SyntaxReference, SyntaxSet};
+use syntect::parsing::{ParseState, ScopeStack, SyntaxReference, SyntaxSet};
 
-use crate::app::FileMerge;
+use crate::app::{ChunkState, FileMerge};
 use crate::merge::{ChunkKind, MergeChunk};
 
 /// 词级强调的降级阈值:任一侧行数超限的块直接跳过
@@ -203,8 +203,8 @@ pub(crate) struct FileHighlight {
     pub(crate) ours: Option<PaneSyntax>,
     /// 远端栏语法高亮(内容不可变,构建一次)
     pub(crate) theirs: Option<PaneSyntax>,
-    /// 结果栏语法高亮(随取用变化,按 revision 失效重算)
-    pub(crate) result: Option<PaneSyntax>,
+    /// 结果栏语法高亮(随取用变化,按 revision 增量重算)
+    pub(crate) result: Option<ResultSyntax>,
     /// 匹配到的语法定义;None 表示该文件不做语法高亮
     syntax: Option<&'static SyntaxReference>,
     /// 是否使用浅色语法主题(result 栏重算时沿用)
@@ -225,7 +225,11 @@ impl FileHighlight {
             emphasis,
             ours: highlight(&mut merge.chunks.iter().flat_map(|c| c.ours.iter())),
             theirs: highlight(&mut merge.chunks.iter().flat_map(|c| c.theirs.iter())),
-            result: syntax.map(|s| highlight_result(merge, s, light)),
+            result: syntax.map(|s| {
+                let mut result = ResultSyntax::default();
+                result.update(merge, s, light);
+                result
+            }),
             syntax,
             light,
             result_rev: rev,
@@ -241,7 +245,7 @@ pub(crate) struct HighlightCache {
 
 impl HighlightCache {
     /// 取当前文件的高亮信息:首次访问时构建;
-    /// revision 变化(取用 / 撤销 / 编辑)时只重算结果栏。
+    /// revision 变化(取用 / 撤销 / 编辑)时只增量重算结果栏的变化块。
     pub(crate) fn get(
         &mut self,
         file_idx: usize,
@@ -254,13 +258,124 @@ impl HighlightCache {
             .entry(file_idx)
             .or_insert_with(|| FileHighlight::build(merge, rev, light));
         if entry.result_rev != rev {
-            entry.result = entry
-                .syntax
-                .map(|s| highlight_result(merge, s, entry.light));
+            if let (Some(result), Some(syntax)) = (entry.result.as_mut(), entry.syntax) {
+                result.update(merge, syntax, entry.light);
+            }
             entry.result_rev = rev;
         }
         entry
     }
+}
+
+/// 结果栏语法高亮:按块缓存边界解析状态与输出。
+///
+/// syntect 的解析状态跨行传递,无法按块独立计算;但可以在块边界快照状态:
+/// 取用 / 撤销时从第一个内容变化的块开始重算,一旦后续块的入口状态与
+/// 缓存一致即恢复命中(状态收敛),把单次按键的成本从 O(全文件) 降到
+/// O(变化块 + 收敛尾巴)。
+#[derive(Debug, Default)]
+pub(crate) struct ResultSyntax {
+    /// 与 chunks 一一对应的块级缓存
+    chunks: Vec<ChunkSyntax>,
+    /// 最近一次 update 实际解析的行数(增量效果的观测口)
+    parsed_lines: usize,
+}
+
+/// 结果栏单个块的高亮缓存。
+#[derive(Debug)]
+struct ChunkSyntax {
+    /// 块解决状态的指纹(内容仅由取用顺序与覆写决定)
+    fingerprint: u64,
+    /// 进入该块时的解析 / 高亮状态(命中判定用)
+    start: (ParseState, HighlightState),
+    /// 离开该块时的状态(命中时快进用)
+    end: (ParseState, HighlightState),
+    /// 块内每行的着色段
+    spans: Vec<Vec<(Color, Range<usize>)>>,
+}
+
+impl ResultSyntax {
+    /// 增量重算:逐块走一遍,指纹与入口状态都命中的块直接复用并快进状态。
+    fn update(&mut self, merge: &FileMerge, syntax: &SyntaxReference, light: bool) {
+        let set = syntax_set();
+        let theme = syntect_theme(light);
+        let highlighter = Highlighter::new(theme);
+        let default_fg = theme.settings.foreground;
+        let mut parse = ParseState::new(syntax);
+        let mut hl = HighlightState::new(&highlighter, ScopeStack::new());
+        self.parsed_lines = 0;
+
+        for idx in 0..merge.chunks.len() {
+            let fingerprint = state_fingerprint(&merge.states[idx]);
+            if let Some(cached) = self.chunks.get(idx)
+                && cached.fingerprint == fingerprint
+                && cached.start.0 == parse
+                && cached.start.1 == hl
+            {
+                parse = cached.end.0.clone();
+                hl = cached.end.1.clone();
+                continue;
+            }
+            let start = (parse.clone(), hl.clone());
+            let lines = merge.current_content(idx);
+            let mut spans = Vec::with_capacity(lines.len());
+            for line in &lines {
+                spans.push(line_spans(
+                    &mut parse,
+                    &mut hl,
+                    &highlighter,
+                    default_fg,
+                    line,
+                    set,
+                ));
+                self.parsed_lines += 1;
+            }
+            let entry = ChunkSyntax {
+                fingerprint,
+                start,
+                end: (parse.clone(), hl.clone()),
+                spans,
+            };
+            match self.chunks.get_mut(idx) {
+                Some(slot) => *slot = entry,
+                None => self.chunks.push(entry),
+            }
+        }
+        self.chunks.truncate(merge.chunks.len());
+    }
+
+    /// 取某块内某行(块内偏移)的着色段。
+    pub(crate) fn spans(&self, chunk: usize, offset: usize) -> &[(Color, Range<usize>)] {
+        self.chunks
+            .get(chunk)
+            .and_then(|c| c.spans.get(offset))
+            .map_or(&[], Vec::as_slice)
+    }
+
+    /// 结果栏当前缓存的总行数(测试断言用)。
+    #[cfg(test)]
+    fn line_count(&self) -> usize {
+        self.chunks.iter().map(|c| c.spans.len()).sum()
+    }
+}
+
+/// 块解决状态的指纹:结果内容仅由「取用顺序 + 覆写内容」决定,
+/// 无需拼接行内容即可判断块是否变化。
+fn state_fingerprint(state: &ChunkState) -> u64 {
+    use std::hash::{Hash, Hasher};
+    let mut hasher = std::collections::hash_map::DefaultHasher::new();
+    state.order.len().hash(&mut hasher);
+    for side in &state.order {
+        matches!(side, crate::app::Side::Ours).hash(&mut hasher);
+    }
+    match &state.override_lines {
+        None => false.hash(&mut hasher),
+        Some(lines) => {
+            true.hash(&mut hasher);
+            lines.hash(&mut hasher);
+        }
+    }
+    hasher.finish()
 }
 
 /// 按扩展名匹配语法定义;超大文件(三栏总行数超限)禁用。
@@ -288,38 +403,45 @@ fn highlight_pane(
 ) -> PaneSyntax {
     let set = syntax_set();
     let theme = syntect_theme(light);
-    // 等于主题默认前景的 token(普通标识符 / 标点)不产出着色段,
-    // 交回终端默认前景,保持正文亮度;只有语义色 token(关键字 / 字符串等)上色
+    let highlighter = Highlighter::new(theme);
     let default_fg = theme.settings.foreground;
-    let mut hl = HighlightLines::new(syntax, theme);
-    let mut out = Vec::new();
-    for line in lines {
-        // newlines 版语法集要求行带换行符,产出区间时再剔除
-        let with_nl = format!("{line}\n");
-        let mut spans = Vec::new();
-        if let Ok(regions) = hl.highlight_line(&with_nl, set) {
-            let mut pos = 0usize;
-            for (style, token) in regions {
-                let end = pos + token.len();
-                let clipped = end.min(line.len());
-                if clipped > pos && Some(style.foreground) != default_fg {
-                    let fg = style.foreground;
-                    spans.push((super::theme::term_color(fg.r, fg.g, fg.b), pos..clipped));
-                }
-                pos = end;
-            }
-        }
-        out.push(spans);
-    }
+    let mut parse = ParseState::new(syntax);
+    let mut hl = HighlightState::new(&highlighter, ScopeStack::new());
+    let out = lines
+        .map(|line| line_spans(&mut parse, &mut hl, &highlighter, default_fg, line, set))
+        .collect();
     PaneSyntax { lines: out }
 }
 
-/// 高亮结果栏的当前内容(按块拼接后的完整文档)。
-fn highlight_result(merge: &FileMerge, syntax: &SyntaxReference, light: bool) -> PaneSyntax {
-    let lines: Vec<String> = (0..merge.chunks.len())
-        .flat_map(|i| merge.current_content(i))
-        .collect();
-    highlight_pane(&mut lines.iter(), syntax, light)
+/// 用低层 API 高亮一行,推进解析 / 高亮状态,产出非默认前景的着色段。
+///
+/// newlines 版语法集要求输入行带换行符,产出区间时再剔除;
+/// 等于主题默认前景的 token(普通标识符 / 标点)不产出着色段,
+/// 交回终端默认前景,保持正文亮度;只有语义色 token(关键字 / 字符串等)上色。
+fn line_spans(
+    parse: &mut ParseState,
+    hl: &mut HighlightState,
+    highlighter: &Highlighter<'_>,
+    default_fg: Option<SyntectColor>,
+    line: &str,
+    set: &SyntaxSet,
+) -> Vec<(Color, Range<usize>)> {
+    let with_nl = format!("{line}\n");
+    let mut spans = Vec::new();
+    let Ok(ops) = parse.parse_line(&with_nl, set) else {
+        return spans;
+    };
+    let mut pos = 0usize;
+    for (style, token) in HighlightIterator::new(hl, &ops, &with_nl, highlighter) {
+        let end = pos + token.len();
+        let clipped = end.min(line.len());
+        if clipped > pos && Some(style.foreground) != default_fg {
+            let fg = style.foreground;
+            spans.push((super::theme::term_color(fg.r, fg.g, fg.b), pos..clipped));
+        }
+        pos = end;
+    }
+    spans
 }
 
 /// 计算一个块的词级强调;稳定块与超大块返回全空。
@@ -523,25 +645,78 @@ mod tests {
         let mut merge =
             FileMerge::from_three_way("demo.rs".to_owned(), "a\nb\nc\n", "a\nX\nc\n", "a\nY\nc\n");
         let mut cache = HighlightCache::default();
-        let before = cache
-            .get(0, &merge, 0, false)
-            .result
-            .as_ref()
-            .unwrap()
-            .lines
-            .len();
+        let before = cache.get(0, &merge, 0, false).result.as_ref().unwrap();
+        assert_eq!(before.line_count(), 3);
         // 冲突两侧都取用 → 结果行数 3 → 4
         merge.apply(crate::app::Side::Ours);
         merge.apply(crate::app::Side::Theirs);
-        let after = cache
-            .get(0, &merge, 1, false)
-            .result
-            .as_ref()
-            .unwrap()
-            .lines
-            .len();
-        assert_eq!(before, 3);
-        assert_eq!(after, 4);
+        let after = cache.get(0, &merge, 1, false).result.as_ref().unwrap();
+        assert_eq!(after.line_count(), 4);
+    }
+
+    /// 增量重算与全量重建的着色结果完全一致(含取用 / 撤销 / 覆写序列)
+    #[test]
+    fn incremental_matches_full_recompute() {
+        let base = "fn a() {}\nfn b() {}\nfn c() {}\nfn d() {}\n";
+        let ours = "fn a() { let x = 1; }\nfn b() {}\nfn c() { /* c */ }\nfn d() {}\n";
+        let theirs = "fn a() { let y = \"s\"; }\nfn b() {}\nfn c() {}\nfn d() { unsafe {} }\n";
+        let mut merge = FileMerge::from_three_way("demo.rs".to_owned(), base, ours, theirs);
+        let mut cache = HighlightCache::default();
+        let _ = cache.get(0, &merge, 0, false);
+
+        // 依次:取本地、追加远端、撤销、覆写,每步都与全量重建对比
+        let steps: [&dyn Fn(&mut FileMerge); 4] = [
+            &|m| m.apply(crate::app::Side::Ours),
+            &|m| m.apply(crate::app::Side::Theirs),
+            &|m| m.undo(),
+            &|m| m.set_override(vec!["fn a() { merged() }".to_owned()]),
+        ];
+        for (rev, step) in steps.iter().enumerate() {
+            step(&mut merge);
+            let incremental = cache.get(0, &merge, rev as u64 + 1, false);
+            let mut fresh_cache = HighlightCache::default();
+            let fresh = fresh_cache.get(0, &merge, 0, false);
+            let (inc, full) = (
+                incremental.result.as_ref().unwrap(),
+                fresh.result.as_ref().unwrap(),
+            );
+            for idx in 0..merge.chunks.len() {
+                for offset in 0..merge.current_content(idx).len() {
+                    assert_eq!(
+                        inc.spans(idx, offset),
+                        full.spans(idx, offset),
+                        "块 {idx} 行 {offset} 在第 {rev} 步后着色不一致"
+                    );
+                }
+            }
+        }
+    }
+
+    /// 增量重算只解析变化块(其余块靠指纹 + 状态收敛命中)
+    #[test]
+    fn incremental_update_skips_unchanged_chunks() {
+        // 大稳定区 + 一个冲突 + 大稳定区:单键后只应重算冲突块
+        let stable: String = (0..200).map(|i| format!("fn f{i}() {{}}\n")).collect();
+        let base = format!("{stable}fn x() {{ old() }}\n{stable}");
+        let ours = format!("{stable}fn x() {{ ours() }}\n{stable}");
+        let theirs = format!("{stable}fn x() {{ theirs() }}\n{stable}");
+        let mut merge = FileMerge::from_three_way("demo.rs".to_owned(), &base, &ours, &theirs);
+        let total: usize = (0..merge.chunks.len())
+            .map(|i| merge.current_content(i).len())
+            .sum();
+
+        let mut cache = HighlightCache::default();
+        let first = cache.get(0, &merge, 0, false).result.as_ref().unwrap();
+        assert_eq!(first.parsed_lines, total, "首次构建应全量解析");
+
+        merge.apply(crate::app::Side::Ours);
+        merge.ignore(crate::app::Side::Theirs);
+        let second = cache.get(0, &merge, 1, false).result.as_ref().unwrap();
+        assert!(
+            second.parsed_lines <= 5,
+            "增量重算应只解析变化块(实际解析 {} 行,全文 {total} 行)",
+            second.parsed_lines
+        );
     }
 
     /// 三栏总行数超限的文件禁用语法高亮

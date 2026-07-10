@@ -287,12 +287,13 @@ pub(crate) fn draw_columns(
                         .map_or(&[], Vec::as_slice),
                     _ => &[],
                 };
-                // 语法高亮按栏内绝对行号寻址
-                let fg_spans = match (pane, cell) {
+                // 语法高亮寻址:左右栏按栏内绝对行号,结果栏按 (块, 块内偏移)
+                let fg_spans: &[(Color, Range<usize>)] = match (pane, cell) {
                     (Pane::Local, Cell::Line { no, .. }) => pane_fg(highlight.ours.as_ref(), *no),
-                    (Pane::Result, Cell::Line { no, .. }) => {
-                        pane_fg(highlight.result.as_ref(), *no)
-                    }
+                    (Pane::Result, Cell::Line { offset, .. }) => highlight
+                        .result
+                        .as_ref()
+                        .map_or(&[], |r| r.spans(row.chunk, *offset)),
                     (Pane::Remote, Cell::Line { no, .. }) => {
                         pane_fg(highlight.theirs.as_ref(), *no)
                     }
