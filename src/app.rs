@@ -92,6 +92,8 @@ pub struct FileMerge {
     pub cursor: usize,
     /// 视口滚动行偏移(由 UI 维护)
     pub scroll: usize,
+    /// 视口水平平移列偏移(显示列;三栏共用,由 UI 维护)
+    pub hscroll: usize,
     /// 视口是否跟随光标块(手动滚动后为 false,作用于光标的动作恢复跟随)
     pub follow: bool,
     /// 本地侧栏头标签(分支名)
@@ -122,6 +124,7 @@ impl FileMerge {
             states,
             cursor,
             scroll: 0,
+            hscroll: 0,
             follow: true,
             ours_label: result.ours_label,
             theirs_label: result.theirs_label,

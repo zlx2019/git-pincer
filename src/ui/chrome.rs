@@ -40,7 +40,7 @@ pub fn draw(frame: &mut Frame, session: &mut Session, ui: &mut UiState) {
                 &ui.theme,
                 highlight,
                 rows,
-                &mut ui.scroll_request,
+                (&mut ui.scroll_request, &mut ui.hscroll_request),
             );
         }
         FileEntry::Binary {
@@ -52,6 +52,7 @@ pub fn draw(frame: &mut Frame, session: &mut Session, ui: &mut UiState) {
     }
     // 二进制视图不消费滚动请求,统一清零避免残留到后续文本文件
     ui.scroll_request = 0;
+    ui.hscroll_request = 0;
     draw_hints(frame, hints, &ui.theme);
     frame.render_widget(
         Paragraph::new(ui.message.as_str()).style(Style::new().fg(ui.theme.amber)),
@@ -452,6 +453,47 @@ mod tests {
         let (snapped, follow) = scroll_of(&session);
         assert!(follow);
         assert!(snapped < scrolled, "视口应吸附回顶部的冲突块");
+    }
+
+    /// 水平平移:请求按固定步长结算并钳制在溢出范围内,不影响光标跟随
+    #[test]
+    fn hscroll_settles_with_step_and_clamp() {
+        let long = "x".repeat(200);
+        let base = format!("a\n{long}\n");
+        let ours = format!("A\n{long}\n");
+        let theirs = format!("X\n{long}\n");
+        let merge = FileMerge::from_three_way("demo.txt".to_owned(), &base, &ours, &theirs);
+        let mut session = Session::new(vec![FileEntry::Text(merge)], "merge".to_owned());
+        session.folded = false;
+        let mut ui = UiState::default();
+        let mut terminal = Terminal::new(TestBackend::new(100, 24)).unwrap();
+        let hscroll_of = |s: &Session| match s.current_file() {
+            FileEntry::Text(m) => (m.hscroll, m.follow),
+            FileEntry::Binary { .. } => unreachable!(),
+        };
+
+        terminal.draw(|f| draw(f, &mut session, &mut ui)).unwrap();
+        assert_eq!(hscroll_of(&session), (0, true));
+        // 未平移但行溢出:右缘已有截断指示
+        assert!(format!("{:?}", terminal.backend().buffer()).contains('…'));
+
+        // 右移一步:固定 8 列,消费请求且保持跟随(水平平移不脱离光标)
+        ui.hscroll_request = 1;
+        terminal.draw(|f| draw(f, &mut session, &mut ui)).unwrap();
+        assert_eq!(hscroll_of(&session), (8, true));
+        assert_eq!(ui.hscroll_request, 0);
+
+        // 大量右移:钳制在最大溢出量(不会滚出全空白)
+        ui.hscroll_request = 100;
+        terminal.draw(|f| draw(f, &mut session, &mut ui)).unwrap();
+        let (clamped, _) = hscroll_of(&session);
+        assert!(clamped >= 8, "应向右前进");
+        assert!(clamped < 200, "上限必须小于行宽");
+
+        // 左移超量:钳回 0
+        ui.hscroll_request = -1000;
+        terminal.draw(|f| draw(f, &mut session, &mut ui)).unwrap();
+        assert_eq!(hscroll_of(&session).0, 0);
     }
 
     /// 二进制条目渲染不 panic
