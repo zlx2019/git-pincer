@@ -345,8 +345,17 @@ fn lists_branches_and_recent_commits() {
 fn cloned_repo(origin: &TempRepo, name: &str) -> TempRepo {
     let dir = std::env::temp_dir().join(format!("git-pincer-test-{}-{name}", std::process::id()));
     let _ = std::fs::remove_dir_all(&dir);
+    // autocrlf 必须在克隆时就关闭(-c 写入新仓库配置并在检出前生效):
+    // Windows runner 默认 autocrlf=true,若克隆后再改配置,已检出的 CRLF
+    // 工作区会被视为本地改动,后续 switch 全部被 git 拒绝
     let out = clean_git(&std::env::temp_dir())
-        .args(["clone", origin.dir.to_str().unwrap(), dir.to_str().unwrap()])
+        .args([
+            "clone",
+            "-c",
+            "core.autocrlf=false",
+            origin.dir.to_str().unwrap(),
+            dir.to_str().unwrap(),
+        ])
         .output()
         .unwrap();
     assert!(
@@ -358,7 +367,6 @@ fn cloned_repo(origin: &TempRepo, name: &str) -> TempRepo {
     repo.git(&["config", "user.name", "tester"]);
     repo.git(&["config", "user.email", "tester@example.com"]);
     repo.git(&["config", "commit.gpgsign", "false"]);
-    repo.git(&["config", "core.autocrlf", "false"]);
     repo
 }
 
