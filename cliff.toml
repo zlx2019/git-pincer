@@ -65,6 +65,10 @@ commit_preprocessors = [
 commit_parsers = [
     { message = "\\[skip", skip = true },
     { message = "\\p{Han}", skip = true },
+    # Merge commits duplicate the PR's commits (and drag the whole PR body
+    # into the notes); the real changes are already listed by their groups.
+    # Covers "Merge pull request", "Merge branch" and "Merge remote-tracking branch"
+    { message = "^Merge (pull request|(remote-tracking )?branch)", skip = true },
     { message = "^feat", group = "Features" },
     { message = "^fix", group = "Bug Fixes" },
     { message = "^doc", group = "Documentation" },
