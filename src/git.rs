@@ -297,22 +297,35 @@ impl Git {
             let out = self.run_ok(&["branch", "--show-current"])?;
             String::from_utf8_lossy(&out.stdout).trim().to_owned()
         };
-        let queries: [&[&str]; 2] = [
-            &["branch", "--format=%(refname:short)"],
-            &["branch", "-r", "--format=%(refname:short)"],
-        ];
         let mut branches = Vec::new();
-        for args in queries {
-            let out = self.run_ok(args)?;
-            for line in String::from_utf8_lossy(&out.stdout).lines() {
-                let name = line.trim();
-                if name.is_empty() || name == current || name.contains("HEAD") {
-                    continue;
-                }
-                branches.push(name.to_owned());
-            }
+        for prefix in ["refs/heads", "refs/remotes"] {
+            branches.extend(
+                self.list_refs(prefix)?
+                    .into_iter()
+                    .filter(|name| *name != current),
+            );
         }
         Ok(branches)
+    }
+
+    /// 列出某前缀下的分支引用(短名),符号引用(如 origin/HEAD)被剔除。
+    ///
+    /// 不用 `branch --format=%(refname:short)`:它对 `origin/HEAD` 的缩写
+    /// 行为随 git 版本变化(旧版输出 `origin/HEAD`,新版输出裸 `origin`),
+    /// 按名称启发过滤不可靠;`%(symref)` 字段可精确识别符号引用。
+    fn list_refs(&self, prefix: &str) -> Result<Vec<String>, GitError> {
+        let out = self.run_ok(&[
+            "for-each-ref",
+            prefix,
+            "--format=%(refname:lstrip=2)\t%(symref)",
+        ])?;
+        Ok(String::from_utf8_lossy(&out.stdout)
+            .lines()
+            .filter_map(|line| {
+                let (name, symref) = line.split_once('\t').unwrap_or((line.trim(), ""));
+                (!name.is_empty() && symref.is_empty()).then(|| name.to_owned())
+            })
+            .collect())
     }
 
     /// 列出可切换的分支:本地分支排除当前;远程分支排除 HEAD 符号引用,
@@ -323,21 +336,14 @@ impl Git {
             let out = self.run_ok(&["branch", "--show-current"])?;
             String::from_utf8_lossy(&out.stdout).trim().to_owned()
         };
-        let list = |args: &[&str]| -> Result<Vec<String>, GitError> {
-            let out = self.run_ok(args)?;
-            Ok(String::from_utf8_lossy(&out.stdout)
-                .lines()
-                .map(str::trim)
-                .filter(|name| !name.is_empty() && !name.contains("HEAD"))
-                .map(str::to_owned)
-                .collect())
-        };
-        let locals: Vec<String> = list(&["branch", "--format=%(refname:short)"])?
+        let locals: Vec<String> = self
+            .list_refs("refs/heads")?
             .into_iter()
             .filter(|name| *name != current)
             .collect();
         // 远程分支去掉首段远程名后与本地重名的隐藏(origin/feat/x → feat/x)
-        let remotes = list(&["branch", "-r", "--format=%(refname:short)"])?
+        let remotes = self
+            .list_refs("refs/remotes")?
             .into_iter()
             .filter(|name| {
                 let short = name.split_once('/').map_or(name.as_str(), |(_, rest)| rest);
