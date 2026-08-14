@@ -52,6 +52,7 @@ fn menu_loop(git: &Git, light: bool) -> Result<()> {
             tr("menu.cherry_hint"),
         ),
         ("revert", tr("menu.revert_desc"), tr("menu.revert_hint")),
+        ("switch", tr("menu.switch_desc"), tr("menu.switch_hint")),
     ]
     .into_iter()
     .map(|(label, desc, hint)| MenuItem::new(label, desc).with_hint(hint))
@@ -95,6 +96,18 @@ fn menu_loop(git: &Git, light: bool) -> Result<()> {
                     } else {
                         vec!["rebase".to_owned(), target]
                     }
+                }
+                5 => {
+                    let items = super::switch::branch_items(&git.list_switch_branches()?);
+                    if items.is_empty() {
+                        session.notice(tr("menu.notice_info"), tr("menu.no_branches"))?;
+                        continue;
+                    }
+                    let Some(idx) = session.pick(tr("menu.pick_switch"), &items, None, 0)? else {
+                        continue;
+                    };
+                    // 本地分支直切,远程分支自动带 --track 建本地跟踪分支
+                    super::switch::switch_cmd(git, &items[idx].label)?
                 }
                 _ => {
                     let others_only = action == 3;

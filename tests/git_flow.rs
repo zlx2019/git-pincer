@@ -341,6 +341,89 @@ fn lists_branches_and_recent_commits() {
     );
 }
 
+/// 克隆 origin 仓库,得到带远程跟踪分支的工作仓库。
+fn cloned_repo(origin: &TempRepo, name: &str) -> TempRepo {
+    let dir = std::env::temp_dir().join(format!("git-pincer-test-{}-{name}", std::process::id()));
+    let _ = std::fs::remove_dir_all(&dir);
+    let out = clean_git(&std::env::temp_dir())
+        .args(["clone", origin.dir.to_str().unwrap(), dir.to_str().unwrap()])
+        .output()
+        .unwrap();
+    assert!(
+        out.status.success(),
+        "clone 失败: {}",
+        String::from_utf8_lossy(&out.stderr)
+    );
+    let repo = TempRepo { dir };
+    repo.git(&["config", "user.name", "tester"]);
+    repo.git(&["config", "user.email", "tester@example.com"]);
+    repo.git(&["config", "commit.gpgsign", "false"]);
+    repo.git(&["config", "core.autocrlf", "false"]);
+    repo
+}
+
+/// 造一个 origin(main / feature 内容不同)并克隆出工作仓库。
+fn repo_with_remote(name: &str) -> (TempRepo, TempRepo) {
+    let origin = TempRepo::new(&format!("{name}-origin"));
+    origin.write("a.txt", "main\n");
+    origin.commit_all("init");
+    origin.git(&["checkout", "-b", "feature"]);
+    origin.write("a.txt", "feature\n");
+    origin.commit_all("feature change");
+    origin.git(&["checkout", "main"]);
+    let clone = cloned_repo(&origin, name);
+    (origin, clone)
+}
+
+/// switch 分支清单:当前分支与其远程对应项被排除,本地已有的远程项被去重
+#[test]
+fn switch_branch_listing_dedupes_remote_counterparts() {
+    let (_origin, repo) = repo_with_remote("switch-list");
+    let git = Git::discover(&repo.dir, false).unwrap();
+
+    // 克隆初始:本地只有 main(当前,被排除);origin/main 因对应当前分支隐藏
+    let branches = git.list_switch_branches().unwrap();
+    assert!(branches.locals.is_empty());
+    assert_eq!(branches.remotes, vec!["origin/feature".to_owned()]);
+
+    // 建立本地 feature 后,origin/feature 应从远程列表消失
+    repo.git(&["branch", "feature", "origin/feature"]);
+    let branches = git.list_switch_branches().unwrap();
+    assert_eq!(branches.locals, vec!["feature".to_owned()]);
+    assert!(branches.remotes.is_empty());
+}
+
+/// switch 命令组装与真实切换:本地直切、远程 --track 建跟踪分支、脏树被拒
+#[test]
+fn switch_resolves_targets_and_switches() {
+    let (_origin, repo) = repo_with_remote("switch-flow");
+    let git = Git::discover(&repo.dir, false).unwrap();
+    let current = |r: &TempRepo| r.git(&["branch", "--show-current"]).trim().to_owned();
+
+    // 远程目标 → --track;未知目标原样交给 git
+    let cmd = git_pincer::commands::switch::switch_cmd(&git, "origin/feature").unwrap();
+    assert_eq!(cmd, ["switch", "--track", "origin/feature"]);
+    let cmd = git_pincer::commands::switch::switch_cmd(&git, "nope").unwrap();
+    assert_eq!(cmd, ["switch", "nope"]);
+
+    // 真实切换到远程分支:本地跟踪分支建立,内容与上游一致
+    repo.git(&["switch", "--track", "origin/feature"]);
+    assert_eq!(current(&repo), "feature");
+    let upstream = repo.git(&["rev-parse", "--abbrev-ref", "feature@{upstream}"]);
+    assert_eq!(upstream.trim(), "origin/feature");
+
+    // 本地目标 → 直切
+    let cmd = git_pincer::commands::switch::switch_cmd(&git, "main").unwrap();
+    assert_eq!(cmd, ["switch", "main"]);
+    repo.git(&["switch", "main"]);
+    assert_eq!(current(&repo), "main");
+
+    // 脏工作区会被覆盖时 git 拒绝切换,停留在原分支(错误原样透传给上层)
+    repo.write("a.txt", "dirty\n");
+    assert!(!repo.git_allow_fail(&["switch", "feature"]), "脏树应被拒绝");
+    assert_eq!(current(&repo), "main");
+}
+
 /// 菜单模式执行:非冲突失败返回 Failed(弹框数据源)而非直接报错
 #[test]
 fn launch_captured_reports_failure_without_bailing() {

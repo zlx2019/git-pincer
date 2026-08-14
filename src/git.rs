@@ -94,6 +94,15 @@ pub struct RepoVitals {
     pub level: usize,
 }
 
+/// 可切换的分支清单(switch 选择器用,按本地 / 远程分组)。
+#[derive(Debug, Default)]
+pub struct SwitchBranches {
+    /// 本地分支(不含当前分支)
+    pub locals: Vec<String>,
+    /// 远程跟踪分支(不含 HEAD 符号引用与已有同名本地分支的项)
+    pub remotes: Vec<String>,
+}
+
 /// git 调用上下文:锚定仓库根目录,verbose 时回显执行的命令。
 pub struct Git {
     /// 仓库根目录;所有命令经 `-C` 锚定,路径统一为根相对
@@ -304,6 +313,46 @@ impl Git {
             }
         }
         Ok(branches)
+    }
+
+    /// 列出可切换的分支:本地分支排除当前;远程分支排除 HEAD 符号引用,
+    /// 以及已有同名本地分支的项(如本地 `foo` 存在时隐藏 `origin/foo`,
+    /// 本地条目已覆盖该目标,避免选择器里重复出现)。
+    pub fn list_switch_branches(&self) -> Result<SwitchBranches, GitError> {
+        let current = {
+            let out = self.run_ok(&["branch", "--show-current"])?;
+            String::from_utf8_lossy(&out.stdout).trim().to_owned()
+        };
+        let list = |args: &[&str]| -> Result<Vec<String>, GitError> {
+            let out = self.run_ok(args)?;
+            Ok(String::from_utf8_lossy(&out.stdout)
+                .lines()
+                .map(str::trim)
+                .filter(|name| !name.is_empty() && !name.contains("HEAD"))
+                .map(str::to_owned)
+                .collect())
+        };
+        let locals: Vec<String> = list(&["branch", "--format=%(refname:short)"])?
+            .into_iter()
+            .filter(|name| *name != current)
+            .collect();
+        // 远程分支去掉首段远程名后与本地重名的隐藏(origin/feat/x → feat/x)
+        let remotes = list(&["branch", "-r", "--format=%(refname:short)"])?
+            .into_iter()
+            .filter(|name| {
+                let short = name.split_once('/').map_or(name.as_str(), |(_, rest)| rest);
+                short != current && !locals.iter().any(|l| l == short)
+            })
+            .collect();
+        Ok(SwitchBranches { locals, remotes })
+    }
+
+    /// 完整引用是否存在(如 `refs/heads/foo` / `refs/remotes/origin/foo`)。
+    pub fn ref_exists(&self, full_ref: &str) -> Result<bool, GitError> {
+        Ok(self
+            .run(&["show-ref", "--verify", "--quiet", full_ref])?
+            .status
+            .success())
     }
 
     /// 最近提交列表(`--oneline` 行,首列为短 hash),提交选择器用。

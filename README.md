@@ -22,7 +22,7 @@ The name comes from Rust's mascot — the crab. A Git conflict is like two branc
 - **Three-pane merge UI** — local | result | remote, with chunk bands colored by change type using IDEA semantics: blue = modified, green = added, gray = deleted, red = conflict. Bands fade as chunks get resolved.
 - **Precise diff rendering** — delta-style word-level emphasis inside changed chunks, plus syntax highlighting (Maple theme via syntect, selected by file extension, gracefully disabled for huge files).
 - **Full flow takeover** — after all files are resolved it runs `git add` and the matching `--continue`, re-probes, and loops until the repository is clean. Multi-commit cherry-picks and multi-round rebases just work.
-- **RPG-style action menu** — running bare `git-pincer` in a clean repository opens a pixel-art menu with a status window that maps your repository to character vitals (Lv. = commit count, HP = uncommitted changes, MP = stashes, EXP = commits ahead). Pick an action, then a branch (merge / rebase) or a commit (cherry-pick / revert); success and failure both pop an in-TUI dialog and return to the menu — no flicker, no exit.
+- **RPG-style action menu** — running bare `git-pincer` in a clean repository opens a pixel-art menu with a status window that maps your repository to character vitals (Lv. = commit count, HP = uncommitted changes, MP = stashes, EXP = commits ahead). Pick an action, then a branch (merge / rebase / switch) or a commit (cherry-pick / revert); success and failure both pop an in-TUI dialog and return to the menu — no flicker, no exit.
 - **Broad conflict-source support** — merge, rebase, pull, cherry-pick, revert, `git am`, and even flows without a `--continue` such as `stash pop`, `checkout -m` or `apply --3way`.
 - **Native git, zero magic** — everything shells out to your git binary (the same route lazygit and IDEA take), so credentials, hooks, merge strategies and rerere all follow your existing configuration. Arguments are passed as arrays (no shell, no injection), and host `GIT_DIR`-style variables are scrubbed so nested invocations from hooks cannot hijack the wrong repository.
 - **Terminal-aware theming** — dark (Tokyo Night) and light (Maple Light) themes via `--theme <auto|dark|light>`, `COLORFGBG` auto-detection, and automatic xterm-256 quantization on terminals without truecolor support.
@@ -59,6 +59,7 @@ git-pincer rebase <branch>      # run git rebase, looping through every conflict
 git-pincer pull origin main     # arguments are passed straight to git pull
 git-pincer cherry-pick <commit> # multiple commits / options are passed through
 git-pincer revert <commit>      # run git revert and take over the conflicts
+git-pincer switch [branch]      # switch branches; remote ones get a local tracking branch (no arg opens a picker)
 git-pincer file conflict.txt    # git-free: parse a conflict-marked file, write it back
 git-pincer abort                # abort the operation in progress (with confirmation)
 git-pincer completions zsh      # shell completion script (bash/zsh/fish/powershell/elvish)
