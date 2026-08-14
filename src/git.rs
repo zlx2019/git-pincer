@@ -94,6 +94,15 @@ pub struct RepoVitals {
     pub level: usize,
 }
 
+/// 可切换的分支清单(switch 选择器用,按本地 / 远程分组)。
+#[derive(Debug, Default)]
+pub struct SwitchBranches {
+    /// 本地分支(不含当前分支)
+    pub locals: Vec<String>,
+    /// 远程跟踪分支(不含 HEAD 符号引用与已有同名本地分支的项)
+    pub remotes: Vec<String>,
+}
+
 /// git 调用上下文:锚定仓库根目录,verbose 时回显执行的命令。
 pub struct Git {
     /// 仓库根目录;所有命令经 `-C` 锚定,路径统一为根相对
@@ -288,22 +297,68 @@ impl Git {
             let out = self.run_ok(&["branch", "--show-current"])?;
             String::from_utf8_lossy(&out.stdout).trim().to_owned()
         };
-        let queries: [&[&str]; 2] = [
-            &["branch", "--format=%(refname:short)"],
-            &["branch", "-r", "--format=%(refname:short)"],
-        ];
         let mut branches = Vec::new();
-        for args in queries {
-            let out = self.run_ok(args)?;
-            for line in String::from_utf8_lossy(&out.stdout).lines() {
-                let name = line.trim();
-                if name.is_empty() || name == current || name.contains("HEAD") {
-                    continue;
-                }
-                branches.push(name.to_owned());
-            }
+        for prefix in ["refs/heads", "refs/remotes"] {
+            branches.extend(
+                self.list_refs(prefix)?
+                    .into_iter()
+                    .filter(|name| *name != current),
+            );
         }
         Ok(branches)
+    }
+
+    /// 列出某前缀下的分支引用(短名),符号引用(如 origin/HEAD)被剔除。
+    ///
+    /// 不用 `branch --format=%(refname:short)`:它对 `origin/HEAD` 的缩写
+    /// 行为随 git 版本变化(旧版输出 `origin/HEAD`,新版输出裸 `origin`),
+    /// 按名称启发过滤不可靠;`%(symref)` 字段可精确识别符号引用。
+    fn list_refs(&self, prefix: &str) -> Result<Vec<String>, GitError> {
+        let out = self.run_ok(&[
+            "for-each-ref",
+            prefix,
+            "--format=%(refname:lstrip=2)\t%(symref)",
+        ])?;
+        Ok(String::from_utf8_lossy(&out.stdout)
+            .lines()
+            .filter_map(|line| {
+                let (name, symref) = line.split_once('\t').unwrap_or((line.trim(), ""));
+                (!name.is_empty() && symref.is_empty()).then(|| name.to_owned())
+            })
+            .collect())
+    }
+
+    /// 列出可切换的分支:本地分支排除当前;远程分支排除 HEAD 符号引用,
+    /// 以及已有同名本地分支的项(如本地 `foo` 存在时隐藏 `origin/foo`,
+    /// 本地条目已覆盖该目标,避免选择器里重复出现)。
+    pub fn list_switch_branches(&self) -> Result<SwitchBranches, GitError> {
+        let current = {
+            let out = self.run_ok(&["branch", "--show-current"])?;
+            String::from_utf8_lossy(&out.stdout).trim().to_owned()
+        };
+        let locals: Vec<String> = self
+            .list_refs("refs/heads")?
+            .into_iter()
+            .filter(|name| *name != current)
+            .collect();
+        // 远程分支去掉首段远程名后与本地重名的隐藏(origin/feat/x → feat/x)
+        let remotes = self
+            .list_refs("refs/remotes")?
+            .into_iter()
+            .filter(|name| {
+                let short = name.split_once('/').map_or(name.as_str(), |(_, rest)| rest);
+                short != current && !locals.iter().any(|l| l == short)
+            })
+            .collect();
+        Ok(SwitchBranches { locals, remotes })
+    }
+
+    /// 完整引用是否存在(如 `refs/heads/foo` / `refs/remotes/origin/foo`)。
+    pub fn ref_exists(&self, full_ref: &str) -> Result<bool, GitError> {
+        Ok(self
+            .run(&["show-ref", "--verify", "--quiet", full_ref])?
+            .status
+            .success())
     }
 
     /// 最近提交列表(`--oneline` 行,首列为短 hash),提交选择器用。

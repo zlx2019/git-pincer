@@ -22,7 +22,7 @@
 - **三栏合并界面** — 本地 | 结果 | 远端,块级色带按改动类型着色,沿用 IDEA 语义:蓝 = 修改、绿 = 新增、灰 = 删除、红 = 冲突;块解决后色带随之消失。
 - **精细的差异呈现** — 改动块内 delta 式词级高亮,配合语法着色(syntect 的 Maple 主题,按扩展名匹配,超大文件自动降级)。
 - **接管完整流程** — 全部文件解决后自动执行 `git add` 与对应的 `--continue`,重新探测并循环,直到仓库干净;多提交摘取、多轮变基开箱即用。
-- **RPG 像素风操作菜单** — 在干净仓库中裸运行 `git-pincer` 弹出像素风菜单,状态窗把仓库映射成角色面板(Lv. = 提交数、HP = 未提交改动、MP = 贮藏、EXP = 待推送);选操作,再选分支(merge / rebase)或提交(cherry-pick / revert),成功与失败都在 TUI 内弹框反馈并回到菜单——不闪屏、不退出。
+- **RPG 像素风操作菜单** — 在干净仓库中裸运行 `git-pincer` 弹出像素风菜单,状态窗把仓库映射成角色面板(Lv. = 提交数、HP = 未提交改动、MP = 贮藏、EXP = 待推送);选操作,再选分支(merge / rebase / switch)或提交(cherry-pick / revert),成功与失败都在 TUI 内弹框反馈并回到菜单——不闪屏、不退出。
 - **广泛的冲突来源支持** — merge、rebase、pull、cherry-pick、revert、`git am`,以及 `stash pop`、`checkout -m`、`apply --3way` 这类没有 `--continue` 的场景。
 - **原生 git,无黑魔法** — 全部 shell out 调用你的 git 二进制(与 lazygit / IDEA 同路),认证、hooks、合并策略、rerere 完全继承现有配置;参数以数组传递不经过 shell(构造上杜绝注入),并清除宿主 `GIT_DIR` 类环境变量,防止从钩子中被调起时嵌套 git 劫持到错误仓库。
 - **终端自适应主题** — 深色(Tokyo Night)/ 浅色(Maple Light)双主题,`--theme <auto|dark|light>` 指定,`auto` 经 `COLORFGBG` 检测;不支持真彩的终端自动量化为 xterm-256 色。
@@ -59,6 +59,7 @@ git-pincer rebase <branch>      # 执行 git rebase,多轮冲突自动循环
 git-pincer pull origin main     # 参数原样透传给 git pull
 git-pincer cherry-pick <commit> # 多提交 / 选项均可透传
 git-pincer revert <commit>      # 执行 git revert 并接管冲突
+git-pincer switch [branch]      # 切换分支;远程分支自动创建本地跟踪分支,无参数时弹出选择器
 git-pincer file conflict.txt    # 免 git:解析带冲突标记的文件,解决后写回
 git-pincer abort                # 中止进行中的合并操作(有确认)
 git-pincer completions zsh      # 生成 shell 补全脚本(bash/zsh/fish/powershell/elvish)

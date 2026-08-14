@@ -69,6 +69,8 @@ pub enum Commands {
     CherryPick(commands::run::CherryPickArgs),
     /// Run `git revert` (all arguments are passed through)
     Revert(commands::run::RevertArgs),
+    /// Switch to another branch (remote branches get a local tracking branch)
+    Switch(commands::switch::SwitchArgs),
     /// Resolve a single conflict-marked file, no git required
     File(commands::file::FileArgs),
     /// Abort the operation in progress (merge / rebase / cherry-pick / revert / am)
@@ -124,6 +126,7 @@ impl Cli {
                 commands::run::cherry_pick(args, verbose, &dir, light)
             }
             Some(Commands::Revert(args)) => commands::run::revert(args, verbose, &dir, light),
+            Some(Commands::Switch(args)) => commands::switch::run(args, verbose, &dir, light),
             Some(Commands::File(args)) => commands::file::run(args, light),
             Some(Commands::Abort) => commands::abort::run(verbose, &dir),
             // 已在配置加载前处理并早退
