@@ -67,6 +67,8 @@ pub struct UiState {
     pub(crate) revision: u64,
     /// 待应用的手动滚动量(半页为单位,正数向下;绘制时消费)
     pub(crate) scroll_request: isize,
+    /// 待应用的水平平移量(固定列步长为单位,正数向右;绘制时消费)
+    pub(crate) hscroll_request: isize,
 }
 
 /// 运行交互会话直至完成或退出。
@@ -158,6 +160,8 @@ fn event_loop(
             // 手动滚动只记录请求,行数与钳制在绘制时按视口高度结算
             Action::ScrollDown => ui.scroll_request += 1,
             Action::ScrollUp => ui.scroll_request -= 1,
+            Action::ScrollRight => ui.hscroll_request += 1,
+            Action::ScrollLeft => ui.hscroll_request -= 1,
             Action::WriteFile => {
                 if write_current(session, write_file, &mut ui)? {
                     // 写盘会自动应用非冲突改动,结果栏内容可能变化

@@ -104,7 +104,7 @@ rpg_accent = "#ff7a2f"
 band_conflict = ["#3a1e22", "#5e2d35"]   # band_* / emph_* 类颜色为 [普通, 选中] 双色对
 ```
 
-可重绑的动作:`take-local`、`take-remote`、`ignore`、`undo`、`undo-file`、`edit`、`apply-all`、`next-change`、`prev-change`、`next-conflict`、`prev-conflict`、`copy-chunk`、`copy-file`、`copy-local`、`copy-remote`、`write`、`next-file`、`fold`、`quit`、`help`。覆盖后的按键会自动同步显示在提示条与帮助浮层中;未知动作名、键位冲突与非法颜色都会在启动时报错并列出全部合法值。
+可重绑的动作:`take-local`、`take-remote`、`ignore`、`undo`、`undo-file`、`edit`、`apply-all`、`next-change`、`prev-change`、`next-conflict`、`prev-conflict`、`scroll-down`、`scroll-up`、`scroll-left`、`scroll-right`、`copy-chunk`、`copy-file`、`copy-local`、`copy-remote`、`write`、`next-file`、`fold`、`quit`、`help`。覆盖后的按键会自动同步显示在提示条与帮助浮层中;未知动作名、键位冲突与非法颜色都会在启动时报错并列出全部合法值。
 
 不需要 git 仓库也能试玩 TUI:
 
@@ -126,6 +126,7 @@ cp fixtures/conflict.txt /tmp/ && git-pincer file /tmp/conflict.txt
 | `j` / `k` | 移动到下一个 / 上一个改动块 |
 | `n` / `p` | 跳到下一个 / 上一个未解决冲突 |
 | `Ctrl+d` / `Ctrl+u` | 视口下/上滚半页(导航键会重新吸附回光标块) |
+| `<` / `>`(或 `Shift+←` / `Shift+→`) | 长行时三栏联动左/右平移(`…` 表示有内容被截断) |
 | `y` / `Y` | 复制当前块结果 / 整个文件结果 |
 | `H` / `L` | 复制当前块的本地侧 / 远端侧 |
 | `w` | 写盘(自动应用剩余非冲突改动,随后 `git add`) |

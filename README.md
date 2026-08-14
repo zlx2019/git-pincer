@@ -104,7 +104,7 @@ rpg_accent = "#ff7a2f"
 band_conflict = ["#3a1e22", "#5e2d35"]   # band_* / emph_* colors take a [normal, selected] pair
 ```
 
-Rebindable actions: `take-local`, `take-remote`, `ignore`, `undo`, `undo-file`, `edit`, `apply-all`, `next-change`, `prev-change`, `next-conflict`, `prev-conflict`, `copy-chunk`, `copy-file`, `copy-local`, `copy-remote`, `write`, `next-file`, `fold`, `quit`, `help`. Overridden keys show up in the hint bar and help overlay automatically. Unknown action names, key conflicts and invalid colors are rejected at startup with the full list of valid values.
+Rebindable actions: `take-local`, `take-remote`, `ignore`, `undo`, `undo-file`, `edit`, `apply-all`, `next-change`, `prev-change`, `next-conflict`, `prev-conflict`, `scroll-down`, `scroll-up`, `scroll-left`, `scroll-right`, `copy-chunk`, `copy-file`, `copy-local`, `copy-remote`, `write`, `next-file`, `fold`, `quit`, `help`. Overridden keys show up in the hint bar and help overlay automatically. Unknown action names, key conflicts and invalid colors are rejected at startup with the full list of valid values.
 
 Try the TUI without a git repository:
 
@@ -126,6 +126,7 @@ cp fixtures/conflict.txt /tmp/ && git-pincer file /tmp/conflict.txt
 | `j` / `k` | Move to the next / previous change chunk |
 | `n` / `p` | Jump to the next / previous unresolved conflict |
 | `Ctrl+d` / `Ctrl+u` | Scroll the viewport half a page down / up (navigation keys re-attach it to the cursor) |
+| `<` / `>` (or `Shift+←` / `Shift+→`) | Pan all three panes left / right on long lines (`…` marks clipped content) |
 | `y` / `Y` | Copy the current chunk result / the whole file result |
 | `H` / `L` | Copy the local / remote side of the current chunk |
 | `w` | Write the file (auto-applies remaining non-conflict changes, then `git add`) |

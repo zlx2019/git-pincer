@@ -44,6 +44,10 @@ pub(crate) enum Action {
     ScrollDown,
     /// 视口上滚半页(脱离光标跟随)
     ScrollUp,
+    /// 视口左移(长行时三栏联动平移)
+    ScrollLeft,
+    /// 视口右移(长行时三栏联动平移)
+    ScrollRight,
     /// 复制当前块结果
     CopyChunk,
     /// 复制整个文件结果
@@ -79,6 +83,8 @@ static ACTION_NAMES: &[(&str, Action)] = &[
     ("prev-conflict", Action::PrevConflict),
     ("scroll-down", Action::ScrollDown),
     ("scroll-up", Action::ScrollUp),
+    ("scroll-left", Action::ScrollLeft),
+    ("scroll-right", Action::ScrollRight),
     ("copy-chunk", Action::CopyChunk),
     ("copy-file", Action::CopyFile),
     ("copy-local", Action::CopyLocal),
@@ -199,6 +205,17 @@ static BINDINGS: &[Binding] = &[
         help: "ui.help_scroll",
     },
     Binding {
+        id: Action::ScrollLeft,
+        keys: &[
+            (KeyCode::Char('<'), KeyModifiers::NONE, Action::ScrollLeft),
+            (KeyCode::Char('>'), KeyModifiers::NONE, Action::ScrollRight),
+            (KeyCode::Left, KeyModifiers::SHIFT, Action::ScrollLeft),
+            (KeyCode::Right, KeyModifiers::SHIFT, Action::ScrollRight),
+        ],
+        hint: None,
+        help: "ui.help_hscroll",
+    },
+    Binding {
         id: Action::NextFile,
         keys: &[(KeyCode::Tab, KeyModifiers::NONE, Action::NextFile)],
         hint: Some("ui.hint_file"),
@@ -271,6 +288,7 @@ static HELP_RIGHT: &[Action] = &[
     Action::NextChange,
     Action::NextConflict,
     Action::ScrollDown,
+    Action::ScrollLeft,
     Action::NextFile,
     Action::ToggleFold,
     Action::CopyChunk,
@@ -461,6 +479,10 @@ fn key_display(code: KeyCode, mods: KeyModifiers, compact: bool) -> String {
     if mods.contains(KeyModifiers::ALT) {
         out.push_str("alt+");
     }
+    // Char 键的 SHIFT 已并入字符本身,只有命名键需要显示 shift+ 前缀
+    if mods.contains(KeyModifiers::SHIFT) && !matches!(code, KeyCode::Char(_)) {
+        out.push_str("shift+");
+    }
     out.push_str(&base);
     out
 }
@@ -592,7 +614,7 @@ mod tests {
     /// 默认表派生的标签与既有界面完全一致(视觉回归守卫)
     #[test]
     fn default_labels_match_previous_ui() {
-        let expected: [(&str, &str); 17] = [
+        let expected: [(&str, &str); 18] = [
             ("h / ←", "h"),
             ("l / →", "l"),
             ("x", "x"),
@@ -604,6 +626,7 @@ mod tests {
             ("j / k", "j/k"),
             ("n / p", "n/p"),
             ("ctrl+d / ctrl+u", "ctrl+d/ctrl+u"),
+            ("< / >", "</>"),
             ("Tab", "⇥"),
             ("z", "z"),
             ("y", "y"),
@@ -734,10 +757,10 @@ mod tests {
         for id in HELP_LEFT.iter().chain(HELP_RIGHT) {
             assert!(group(*id).is_some(), "帮助浮层引用了不存在的绑定组");
         }
-        // 视觉布局守卫:提示条 11 项,帮助两栏各 8 项
+        // 视觉布局守卫:提示条 11 项,帮助左右两栏 8 / 10 项
         assert_eq!(hint_entries().count(), 11);
         let (left, right) = help_columns();
-        assert_eq!((left.len(), right.len()), (8, 9));
+        assert_eq!((left.len(), right.len()), (8, 10));
     }
 
     /// 每个绑定组的标识动作必须能从自身键位触发(防布局引用悬空)
