@@ -1,24 +1,42 @@
-# 安全策略
+# Security Policy
 
-## 支持的版本
+## Supported Versions
 
-我们仅对最新发布版本提供安全更新。
+Security updates are provided only for the latest released version.
 
-| 版本 | 是否支持 |
-|------|----------|
-| 最新 release | 是 |
-| 历史版本 | 否 |
+| Version | Supported |
+|---------|-----------|
+| Latest release | Yes |
+| Historical versions | No |
 
-## 报告漏洞
+## Reporting A Vulnerability
 
-如果你发现安全漏洞，请**不要**通过公开 Issue 提交，以免漏洞在修复前被利用。
+If you discover a security vulnerability, please do **not** report it through a public issue, because doing so may expose the vulnerability before a fix is available.
 
-请通过邮件私下报告：**zero9501@outlook.com**
+Please report it privately by email: **zero9501@outlook.com**
 
-报告时请尽量包含以下信息：
+When reporting, include as much of the following information as possible:
 
-- 漏洞的类型与影响范围
-- 复现步骤或 PoC（概念验证）
-- 受影响的版本
+- Vulnerability type and impact scope
+- Reproduction steps or proof of concept (a script that builds a minimal repository is ideal)
+- Affected versions, install method (cargo, npm or release binary) and operating system
 
-我们会在收到报告后尽快确认，并在修复发布后进行公开披露。
+We will confirm the report as soon as possible and disclose it publicly after a fix has been released.
+
+## Scope
+
+git-pincer runs inside your repository, reads files that other people committed, and writes the resolved result back into your working tree. Findings in these areas are especially welcome:
+
+- **Writing resolved files** — anything that lets a crafted repository (unusual paths, symlinks, glob characters in file names, submodules) make git-pincer write outside the repository, overwrite a file other than the conflicted one, or stage files the user did not resolve.
+- **Command execution** — all git interaction shells out to the `git` binary with an argument array (never through a shell), and host `GIT_DIR`-style variables are scrubbed. Any path that lets repository content influence which command runs, or run in a different repository than the one in use, is in scope. The same applies to the editor launched by the `e` key.
+- **Rendering untrusted content** — conflicted files are displayed in the terminal. Control characters or escape sequences in file content or file names that affect the terminal beyond the intended display are in scope.
+- **Configuration parsing** — a malformed `config.toml` should fail with a readable error; anything beyond that (crash on valid input, unexpected side effects) is in scope.
+- **Release artifacts** — integrity of the published crates.io, npm and GitHub Release artifacts. Every release archive ships with a `.sha256` checksum file.
+
+## Known Limitations
+
+These are documented behaviours rather than vulnerabilities, but they define the security boundary:
+
+- **git-pincer inherits your git configuration.** Credentials, hooks, merge strategies and `rerere` all apply, and your `pre-commit` / `commit-msg` hooks run when git-pincer drives `git ... --continue`.
+- **The configuration file is trusted.** The `[ui] editor` setting (like `$VISUAL` / `$EDITOR`) names a program that is executed when you press `e`. Protect `config.toml` with normal file permissions.
+- **Copying to the clipboard** uses `pbcopy`, `xclip` or `wl-copy` when available and otherwise asks the terminal to set the clipboard through an OSC 52 escape sequence.

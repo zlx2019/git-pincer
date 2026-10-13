@@ -1,20 +1,22 @@
 ---
-name: 功能请求
-about: 为这个项目提出一个新想法
+name: Feature Request
+about: Propose a new idea for this project
 title: "[Feature] "
 labels: enhancement
 ---
 
-## 需求背景
+## Background
 
-<!-- 这个功能要解决什么问题 -->
+<!-- What problem is this feature intended to solve? -->
 
-## 期望方案
+## Proposed Solution
 
-<!-- 你希望如何实现 -->
+<!-- How would you like it to be implemented? -->
 
-## 替代方案
+## Alternatives
 
-<!-- 你考虑过的其他实现方式 -->
+<!-- Other implementation approaches you have considered -->
 
-## 补充信息
+## Additional Information
+
+<!-- Anything else: mockups of the TUI, how other tools (IDEA, lazygit, git mergetool) handle it, ... -->
