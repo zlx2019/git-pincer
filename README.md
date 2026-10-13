@@ -2,16 +2,23 @@
   <img src="./assets/logo.gif" width="320" alt="git-pincer logo">
 </p>
 
-# git-pincer
+<h1 align="center">git-pincer</h1>
 
-[![CI](https://github.com/zlx2019/git-pincer/actions/workflows/ci.yml/badge.svg)](https://github.com/zlx2019/git-pincer/actions/workflows/ci.yml)
-[![crates.io](https://img.shields.io/crates/v/git-pincer.svg)](https://crates.io/crates/git-pincer)
-[![License: MIT](https://img.shields.io/badge/license-MIT-blue.svg)](./LICENSE)
-[![Rust](https://img.shields.io/badge/rust-1.96.0%2B-orange.svg)](https://www.rust-lang.org)
+<p align="center">
+  <a href="https://github.com/zlx2019/git-pincer/actions/workflows/ci.yml"><img src="https://github.com/zlx2019/git-pincer/actions/workflows/ci.yml/badge.svg" alt="CI" /></a>
+  <a href="https://crates.io/crates/git-pincer"><img src="https://img.shields.io/crates/v/git-pincer.svg" alt="crates.io" /></a>
+  <a href="https://www.npmjs.com/package/git-pincer"><img src="https://img.shields.io/npm/v/git-pincer.svg" alt="npm" /></a>
+  <a href="./LICENSE"><img src="https://img.shields.io/badge/license-MIT-blue.svg" alt="License: MIT" /></a>
+  <a href="https://www.rust-lang.org"><img src="https://img.shields.io/badge/rust-1.96.0%2B-orange.svg" alt="Rust" /></a>
+</p>
 
-**English** | [简体中文](./README.zh-CN.md)
+<p align="center">
+  <b>English</b> · <a href="./README.zh-CN.md">简体中文</a>
+</p>
 
-> **"Pincer"** — a Git terminal tool written in Rust, focused on helping developers resolve code conflicts in Git merge, rebase, cherry-pick and similar scenarios with ease.
+<p align="center">
+  <b>"Pincer"</b> — a Git terminal tool written in Rust, focused on helping developers resolve code conflicts in Git merge, rebase, cherry-pick and similar scenarios with ease.
+</p>
 
 The name comes from Rust's mascot — the crab. A Git conflict is like two branches "pinching" the same piece of code at the same time, while a crab's pincer stands for stability, precision and control. May it work like a trusty pincer: gripping both sides of every conflict firmly, helping you understand the differences and complete the merge more efficiently.
 
@@ -19,14 +26,14 @@ The name comes from Rust's mascot — the crab. A Git conflict is like two branc
 
 ## Features
 
-- **Three-pane merge UI** — local | result | remote, with chunk bands colored by change type using IDEA semantics: blue = modified, green = added, gray = deleted, red = conflict. Bands fade as chunks get resolved.
-- **Precise diff rendering** — delta-style word-level emphasis inside changed chunks, plus syntax highlighting (Maple theme via syntect, selected by file extension, gracefully disabled for huge files).
-- **Full flow takeover** — after all files are resolved it runs `git add` and the matching `--continue`, re-probes, and loops until the repository is clean. Multi-commit cherry-picks and multi-round rebases just work.
-- **RPG-style action menu** — running bare `git-pincer` in a clean repository opens a pixel-art menu with a status window that maps your repository to character vitals (Lv. = commit count, HP = uncommitted changes, MP = stashes, EXP = commits ahead). Pick an action, then a branch (merge / rebase / switch) or a commit (cherry-pick / revert); success and failure both pop an in-TUI dialog and return to the menu — no flicker, no exit.
-- **Broad conflict-source support** — merge, rebase, pull, cherry-pick, revert, `git am`, and even flows without a `--continue` such as `stash pop`, `checkout -m` or `apply --3way`.
-- **Native git, zero magic** — everything shells out to your git binary (the same route lazygit and IDEA take), so credentials, hooks, merge strategies and rerere all follow your existing configuration. Arguments are passed as arrays (no shell, no injection), and host `GIT_DIR`-style variables are scrubbed so nested invocations from hooks cannot hijack the wrong repository.
-- **Terminal-aware theming** — dark (Tokyo Night) and light (Maple Light) themes via `--theme <auto|dark|light>`, `COLORFGBG` auto-detection, and automatic xterm-256 quantization on terminals without truecolor support.
-- **Bilingual UI** — every menu, hint and message ships in both English and Chinese; `--lang <auto|zh|en>` with `auto` following the system locale. Messages live in `locales/*.conf` and are embedded at compile time — still a single binary.
+- **Three-pane merge UI** — local | result | remote, with chunks colored like IDEA: blue = modified, green = added, gray = deleted, red = conflict. The color fades once a chunk is resolved.
+- **Precise diff rendering** — delta-style word-level emphasis inside changed chunks, plus syntax highlighting chosen by file extension (turned off for huge files).
+- **Full flow takeover** — once every file is resolved it runs `git add` and the matching `--continue`, then re-checks and repeats until the repository is clean, so multi-commit cherry-picks and multi-round rebases just work.
+- **RPG-style action menu** — bare `git-pincer` in a clean repository opens a pixel-art menu: pick an action, then a branch (merge / rebase / switch) or a commit (cherry-pick / revert). A status window maps your repository to character stats (Lv. = commits, HP = uncommitted changes, MP = stashes, EXP = commits ahead), and results appear as in-TUI dialogs — no flicker, no exit.
+- **Broad conflict-source support** — merge, rebase, pull, cherry-pick, revert, `git am`, and flows without a `--continue` such as `stash pop`, `checkout -m` or `apply --3way`.
+- **Native git, zero magic** — shells out to your git binary (the route lazygit and IDEA take), so credentials, hooks, merge strategies and rerere follow your existing configuration. Arguments are passed as arrays (no shell) and host `GIT_DIR`-style variables are scrubbed, so nested calls from hooks can't hit the wrong repository.
+- **Terminal-aware theming** — dark (Tokyo Night) and light (Maple Light) themes via `--theme <auto|dark|light>`, `COLORFGBG` auto-detection, and xterm-256 quantization on terminals without truecolor.
+- **Bilingual UI** — English and Chinese, chosen with `--lang <auto|zh|en>` (`auto` follows the system locale). Messages are embedded at compile time, so it is still a single binary.
 - **Sensible fallbacks** — binary conflicts degrade to whole-file pick-one; a git-free `file` mode parses conflict markers directly; non-TTY invocations fail with a readable message instead of a panic.
 
 ## Installation
