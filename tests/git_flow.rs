@@ -728,3 +728,55 @@ fn submodule_deleted_side_keeps_checkout() {
     assert_eq!(work, "unpushed\n");
     assert!(git.continue_op(RepoState::Merging).unwrap().success());
 }
+
+/// 制造修改 / 删除冲突:main 修改 name,feature 删除 name。
+fn modify_delete_repo(name: &str, file: &str, base: &str, ours: &str) -> TempRepo {
+    let repo = TempRepo::new(name);
+    repo.write(file, base);
+    repo.commit_all("init");
+    repo.git(&["checkout", "-b", "feature"]);
+    repo.git(&["rm", "-q", file]);
+    repo.commit_all("feature delete");
+    repo.git(&["checkout", "main"]);
+    repo.write(file, ours);
+    repo.commit_all("main change");
+    assert!(!repo.git_allow_fail(&["merge", "--no-edit", "feature"]));
+    repo
+}
+
+/// 修改 / 删除冲突取删除侧:文件真正被删除,而不是留下一个空文件
+/// (文本与二进制文件都降级为整文件二选一)
+#[test]
+fn modify_delete_conflict_deletes_when_deleted_side_is_picked() {
+    for (name, file, base, ours) in [
+        ("md-text", "note.txt", "a\nb\nc\n", "a\nB\nc\n"),
+        ("md-binary", "img.bin", "BIN\0base", "BIN\0ours"),
+    ] {
+        let repo = modify_delete_repo(name, file, base, ours);
+        let git = Git::discover(&repo.dir, false).unwrap();
+        let entry = resolve_first_by_pick(&git, Side::Theirs);
+        assert!(matches!(entry, FileEntry::Pick { theirs: None, .. }));
+
+        assert!(!repo.dir.join(file).exists(), "{file} 应被删除");
+        assert!(git.conflicted_files().unwrap().is_empty());
+        assert!(git.continue_op(RepoState::Merging).unwrap().success());
+        assert!(
+            repo.git(&["ls-tree", "HEAD", "--", file]).is_empty(),
+            "合并提交中不应再有 {file}"
+        );
+    }
+}
+
+/// 修改 / 删除冲突取修改侧:保留修改后的内容
+#[test]
+fn modify_delete_conflict_keeps_modified_side() {
+    let repo = modify_delete_repo("md-keep", "note.txt", "a\nb\nc\n", "a\nB\nc\n");
+    let git = Git::discover(&repo.dir, false).unwrap();
+    resolve_first_by_pick(&git, Side::Ours);
+
+    let content = std::fs::read_to_string(repo.dir.join("note.txt")).unwrap();
+    assert_eq!(content, "a\nB\nc\n");
+    assert!(git.conflicted_files().unwrap().is_empty());
+    assert!(git.continue_op(RepoState::Merging).unwrap().success());
+    assert_eq!(repo.git(&["show", "HEAD:note.txt"]), "a\nB\nc\n");
+}

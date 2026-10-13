@@ -325,7 +325,7 @@ impl FileMerge {
 /// 整文件二选一条目的对象类型(决定卡片如何展示一侧的内容)。
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum PickKind {
-    /// 普通文件(如二进制文件):展示字节数
+    /// 普通文件(二进制文件,或一侧删除了该文件):展示字节数
     File,
     /// 符号链接:展示链接目标
     Symlink,
@@ -338,7 +338,8 @@ pub enum PickKind {
 pub enum FileEntry {
     /// 文本文件:三栏逐块解决
     Text(FileMerge),
-    /// 不能逐块合并的冲突(二进制文件 / 符号链接 / 子模块):降级为整条二选一
+    /// 不能逐块合并的冲突(二进制文件 / 符号链接 / 子模块 / 修改-删除):
+    /// 降级为整条二选一
     Pick {
         /// 文件路径
         path: String,
@@ -371,6 +372,9 @@ impl FileEntry {
     }
 
     /// 导出最终字节内容(前提:ready_to_write);所选一侧已删除时为空。
+    ///
+    /// git 模式下二选一条目经 git 整条取用一侧落盘(删除侧需删除文件,
+    /// 不能写成空文件),见 `commands::resolve::persist`。
     pub fn resolved_bytes(&self) -> Vec<u8> {
         match self {
             FileEntry::Text(m) => m.resolved_content().into_bytes(),

@@ -99,33 +99,31 @@ pub(crate) fn resolve_from_menu(
     resolve_loop(git, light)
 }
 
-/// 落盘一个已解决的文件:符号链接 / 子模块经 git 整条取用所选一侧
-/// (不经文件系统写入),其余写入解决结果并 `git add`。
+/// 落盘一个已解决的文件:文本写入合并结果并 `git add`;二选一条目经 git
+/// 整条取用所选一侧(检出该侧,或在该侧已删除时删除文件),不经文件系统写入。
 pub fn persist(git: &Git, files: &[ConflictedFile], entry: &FileEntry) -> Result<()> {
-    if let FileEntry::Pick {
-        path,
-        kind: PickKind::Symlink | PickKind::Submodule,
-        choice: Some(side),
-        ..
-    } = entry
-    {
-        let file = files
-            .iter()
-            .find(|f| f.path == *path)
-            .with_context(|| format!("{path} is not in the conflict list"))?;
-        let stage = match side {
-            Side::Ours => 2,
-            Side::Theirs => 3,
-        };
-        git.take_side(file, stage)?;
-    } else {
-        git.stage_resolved(entry.path(), &entry.resolved_bytes())?;
+    match entry {
+        FileEntry::Text(merge) => {
+            git.stage_resolved(&merge.path, merge.resolved_content().as_bytes())?;
+        }
+        FileEntry::Pick { path, choice, .. } => {
+            let file = files
+                .iter()
+                .find(|f| f.path == *path)
+                .with_context(|| format!("{path} is not in the conflict list"))?;
+            let stage = match choice {
+                Some(Side::Ours) => 2,
+                Some(Side::Theirs) => 3,
+                None => bail!("{path} has no side picked"),
+            };
+            git.take_side(file, stage)?;
+        }
     }
     Ok(())
 }
 
-/// 由冲突文件列表构建会话:读取三份 stage 内容;子模块、符号链接与含 NUL 的
-/// 二进制文件不能逐块合并,降级为整条二选一。
+/// 由冲突文件列表构建会话:读取三份 stage 内容;子模块、符号链接、修改 / 删除
+/// 冲突与含 NUL 的二进制文件不能逐块合并,降级为整条二选一。
 ///
 /// 全部 stage 的 blob 用一个 `git cat-file --batch` 进程按序批量读回,
 /// 避免逐文件逐 stage spawn 进程。`quiet` 抑制逐文件进度打印
@@ -182,6 +180,18 @@ pub fn build_session(git: &Git, files: &[ConflictedFile], quiet: bool) -> Result
             entries.push(FileEntry::Pick {
                 path,
                 kind: PickKind::Symlink,
+                ours,
+                theirs,
+                choice: None,
+            });
+            continue;
+        }
+        // 修改 / 删除冲突:逐块合并「修改」与「整文件删除」没有意义,
+        // 整文件二选一(与 IDEA / git mergetool 一致),删除侧为 None
+        if ours.is_none() || theirs.is_none() {
+            entries.push(FileEntry::Pick {
+                path,
+                kind: PickKind::File,
                 ours,
                 theirs,
                 choice: None,

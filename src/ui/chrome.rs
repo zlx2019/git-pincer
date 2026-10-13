@@ -54,7 +54,7 @@ pub fn draw(frame: &mut Frame, session: &mut Session, ui: &mut UiState) {
             frame,
             body,
             path,
-            pick_notice(*kind),
+            pick_notice(*kind, ours.is_none() || theirs.is_none()),
             [
                 side_summary(*kind, ours.as_deref()),
                 side_summary(*kind, theirs.as_deref()),
@@ -139,9 +139,11 @@ fn draw_header(frame: &mut Frame, area: Rect, session: &Session, theme: &Theme) 
     frame.render_widget(Paragraph::new(Line::from(spans)), area);
 }
 
-/// 二选一视图顶部的说明:按对象类型说明为何不能逐块合并。
-fn pick_notice(kind: PickKind) -> &'static str {
+/// 二选一视图顶部的说明:按对象类型说明为何不能逐块合并;
+/// 普通文件一侧被删除时说明为修改 / 删除冲突。
+fn pick_notice(kind: PickKind, has_deleted: bool) -> &'static str {
     match kind {
+        PickKind::File if has_deleted => tr("ui.deleted_notice"),
         PickKind::File => tr("ui.binary_notice"),
         PickKind::Symlink => tr("ui.symlink_notice"),
         PickKind::Submodule => tr("ui.submodule_notice"),
@@ -599,6 +601,21 @@ mod tests {
         assert!(content.contains("Symlink"));
         assert!(content.contains("→ b.txt"));
         assert!(content.contains("(deleted)"));
+    }
+
+    /// 修改 / 删除冲突:说明改为修改-删除,删除侧卡片标注已删除
+    #[test]
+    fn draw_modify_delete_entry_explains_deletion() {
+        let content = render_entry(FileEntry::Pick {
+            path: "note.txt".to_owned(),
+            kind: PickKind::File,
+            ours: Some(b"a\nB\nc\n".to_vec()),
+            theirs: None,
+            choice: None,
+        });
+        assert!(content.contains("deleted it"));
+        assert!(!content.contains("Binary"));
+        assert!(content.contains("6 bytes") && content.contains("(deleted)"));
     }
 
     /// 子模块条目:卡片展示两侧记录的短提交 id
