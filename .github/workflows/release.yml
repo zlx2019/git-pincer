@@ -3,7 +3,8 @@ name: Release
 #   - generate the release notes with git-cliff
 #   - create the GitHub Release and attach the per-platform binaries
 #   - publish to crates.io (stable tags only)
-#   - publish to npm: the main package plus one binary package per platform (stable tags only)
+#   - publish to npm: the main package plus one binary package per platform (stable tags only),
+#     through npm trusted publishing (OIDC); no npm token is stored
 on:
   push:
     tags:
@@ -112,6 +113,13 @@ jobs:
     needs: build
     if: ${{ !contains(github.ref_name, '-') }}
     runs-on: ubuntu-latest
+    # Trusted publishing: each of the 7 npm packages has a trusted publisher configured on
+    # npmjs.com that names this repository and THIS FILE (release.yml). Renaming the file
+    # or moving the publish step to another workflow breaks publishing until it is updated.
+    # A job-level `permissions` replaces the workflow-level one, so contents is listed again.
+    permissions:
+      id-token: write # lets npm exchange the job's OIDC token for a short-lived publish token
+      contents: read # checkout and `gh release download`
     env:
       TAG: ${{ github.ref_name }}
     steps:
@@ -120,6 +128,9 @@ jobs:
         with:
           node-version: 22
           registry-url: "https://registry.npmjs.org"
+      # trusted publishing needs npm 11.5.1+, while Node 22 ships npm 10
+      - name: Upgrade npm
+        run: npm install -g npm@^11.5.1 && npm --version
       - name: Download release assets
         run: gh release download "$TAG" --pattern "*.tar.gz" --pattern "*.zip" --dir /tmp/assets
         env:
@@ -135,5 +146,3 @@ jobs:
             npm publish "$pkg" --access public
           done
           npm publish npm/dist/git-pincer --access public
-        env:
-          NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
