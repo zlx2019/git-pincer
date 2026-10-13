@@ -625,3 +625,106 @@ fn stage_resolved_replaces_symlink_instead_of_following() {
         "host = \"merged\"\n"
     );
 }
+
+/// 伪造的子模块提交 id(gitlink 只记录 id,无需真实子仓库)。
+const SUB_BASE: &str = "1111111111111111111111111111111111111111";
+const SUB_OURS: &str = "2222222222222222222222222222222222222222";
+const SUB_THEIRS: &str = "3333333333333333333333333333333333333333";
+
+/// 把 index 中的子模块 sub 指向给定提交(不用 add -A,避免把空目录当作删除)。
+fn set_gitlink(repo: &TempRepo, oid: &str) {
+    let info = format!("160000,{oid},sub");
+    repo.git(&["update-index", "--add", "--cacheinfo", &info]);
+}
+
+/// 子模块指针分叉 + 普通文本冲突同时出现的 merge 现场。
+fn submodule_conflict_repo(name: &str) -> TempRepo {
+    let repo = TempRepo::new(name);
+    let commit = |text: &str, sub: &str, message: &str| {
+        repo.write("t.txt", text);
+        repo.git(&["add", "t.txt"]);
+        set_gitlink(&repo, sub);
+        repo.git(&["commit", "-q", "-m", message]);
+    };
+    commit("base\n", SUB_BASE, "init");
+    repo.git(&["checkout", "-q", "-b", "feature"]);
+    commit("theirs\n", SUB_THEIRS, "feature change");
+    repo.git(&["checkout", "-q", "main"]);
+    commit("ours\n", SUB_OURS, "main change");
+    assert!(!repo.git_allow_fail(&["merge", "--no-edit", "feature"]));
+    repo
+}
+
+/// 子模块冲突不阻塞同轮其他文件:会话照常构建,子模块按提交整条二选一,
+/// 只暂存所选提交,子模块工作区原样保留
+#[test]
+fn submodule_conflict_does_not_block_other_files() {
+    let repo = submodule_conflict_repo("submodule");
+    std::fs::create_dir_all(repo.dir.join("sub")).unwrap();
+    repo.write("sub/work.txt", "unpushed\n");
+
+    let git = Git::discover(&repo.dir, false).unwrap();
+    let files = git.conflicted_files().unwrap();
+    let mut session = build_session(&git, &files, true).unwrap();
+    assert!(
+        matches!(&session.files[1], FileEntry::Text(m) if m.path == "t.txt"),
+        "同轮的文本冲突应照常逐块合并"
+    );
+    let FileEntry::Pick {
+        kind,
+        ours,
+        theirs,
+        choice,
+        ..
+    } = &mut session.files[0]
+    else {
+        panic!("子模块冲突应降级为二选一");
+    };
+    assert_eq!(*kind, PickKind::Submodule);
+    assert_eq!(ours.as_deref(), Some(SUB_OURS.as_bytes()));
+    assert_eq!(theirs.as_deref(), Some(SUB_THEIRS.as_bytes()));
+    *choice = Some(Side::Theirs);
+    persist(&git, &files, &session.files[0]).unwrap();
+    git.stage_resolved("t.txt", b"resolved\n").unwrap();
+
+    assert!(git.conflicted_files().unwrap().is_empty());
+    assert!(git.continue_op(RepoState::Merging).unwrap().success());
+    assert_eq!(repo.git(&["rev-parse", "HEAD:sub"]).trim(), SUB_THEIRS);
+    let work = std::fs::read_to_string(repo.dir.join("sub/work.txt")).unwrap();
+    assert_eq!(work, "unpushed\n");
+}
+
+/// 子模块修改 / 删除冲突取删除侧:只从 index 移除,子模块工作区原样保留
+#[test]
+fn submodule_deleted_side_keeps_checkout() {
+    let repo = TempRepo::new("submodule-del");
+    repo.write("keep.txt", "keep\n");
+    repo.git(&["add", "keep.txt"]);
+    set_gitlink(&repo, SUB_BASE);
+    repo.git(&["commit", "-q", "-m", "init"]);
+    repo.git(&["checkout", "-q", "-b", "feature"]);
+    repo.git(&["rm", "-q", "--cached", "sub"]);
+    repo.git(&["commit", "-q", "-m", "feature delete"]);
+    repo.git(&["checkout", "-q", "main"]);
+    set_gitlink(&repo, SUB_OURS);
+    repo.git(&["commit", "-q", "-m", "main move"]);
+    assert!(!repo.git_allow_fail(&["merge", "--no-edit", "feature"]));
+    std::fs::create_dir_all(repo.dir.join("sub")).unwrap();
+    repo.write("sub/work.txt", "unpushed\n");
+
+    let git = Git::discover(&repo.dir, false).unwrap();
+    let entry = resolve_first_by_pick(&git, Side::Theirs);
+    assert!(matches!(
+        entry,
+        FileEntry::Pick {
+            kind: PickKind::Submodule,
+            theirs: None,
+            ..
+        }
+    ));
+    assert!(git.conflicted_files().unwrap().is_empty());
+    assert!(repo.git(&["ls-files", "sub"]).is_empty());
+    let work = std::fs::read_to_string(repo.dir.join("sub/work.txt")).unwrap();
+    assert_eq!(work, "unpushed\n");
+    assert!(git.continue_op(RepoState::Merging).unwrap().success());
+}

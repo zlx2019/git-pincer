@@ -99,12 +99,12 @@ pub(crate) fn resolve_from_menu(
     resolve_loop(git, light)
 }
 
-/// 落盘一个已解决的文件:符号链接经 git 整条取用所选一侧(检出而非写入,
-/// 不会写穿链接),其余写入解决结果并 `git add`。
+/// 落盘一个已解决的文件:符号链接 / 子模块经 git 整条取用所选一侧
+/// (不经文件系统写入),其余写入解决结果并 `git add`。
 pub fn persist(git: &Git, files: &[ConflictedFile], entry: &FileEntry) -> Result<()> {
     if let FileEntry::Pick {
         path,
-        kind: PickKind::Symlink,
+        kind: PickKind::Symlink | PickKind::Submodule,
         choice: Some(side),
         ..
     } = entry
@@ -124,7 +124,7 @@ pub fn persist(git: &Git, files: &[ConflictedFile], entry: &FileEntry) -> Result
     Ok(())
 }
 
-/// 由冲突文件列表构建会话:读取三份 stage 内容;符号链接与含 NUL 的
+/// 由冲突文件列表构建会话:读取三份 stage 内容;子模块、符号链接与含 NUL 的
 /// 二进制文件不能逐块合并,降级为整条二选一。
 ///
 /// 全部 stage 的 blob 用一个 `git cat-file --batch` 进程按序批量读回,
@@ -134,6 +134,8 @@ pub fn build_session(git: &Git, files: &[ConflictedFile], quiet: bool) -> Result
     let state = git.state()?;
     let oids: Vec<&str> = files
         .iter()
+        // 子模块的提交不在本仓库对象库中,读取会失败并阻塞整轮会话
+        .filter(|f| !f.is_submodule())
         .flat_map(|f| [&f.base, &f.ours, &f.theirs])
         .flatten()
         .map(|stage| stage.oid.as_str())
@@ -159,10 +161,22 @@ pub fn build_session(git: &Git, files: &[ConflictedFile], quiet: bool) -> Result
                 )
             );
         }
+        let path = file.path.clone();
+        // 子模块:不读取内容(其 stage 不在批量请求中),两侧以记录的提交 id 展示
+        if file.is_submodule() {
+            let commit = |stage: &Option<Stage>| stage.as_ref().map(|s| s.oid.clone().into_bytes());
+            entries.push(FileEntry::Pick {
+                path,
+                kind: PickKind::Submodule,
+                ours: commit(&file.ours),
+                theirs: commit(&file.theirs),
+                choice: None,
+            });
+            continue;
+        }
         let base = take(&file.base);
         let ours = take(&file.ours);
         let theirs = take(&file.theirs);
-        let path = file.path.clone();
         // 符号链接:链接目标不能按文本合并,写盘也不能经文件系统(会写穿链接)
         if file.is_symlink() {
             entries.push(FileEntry::Pick {

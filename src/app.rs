@@ -329,6 +329,8 @@ pub enum PickKind {
     File,
     /// 符号链接:展示链接目标
     Symlink,
+    /// 子模块:展示该侧记录的提交 id
+    Submodule,
 }
 
 /// 会话中的单个待解决文件。
@@ -336,13 +338,13 @@ pub enum PickKind {
 pub enum FileEntry {
     /// 文本文件:三栏逐块解决
     Text(FileMerge),
-    /// 不能逐块合并的冲突(二进制文件 / 符号链接):降级为整条二选一
+    /// 不能逐块合并的冲突(二进制文件 / 符号链接 / 子模块):降级为整条二选一
     Pick {
         /// 文件路径
         path: String,
         /// 对象类型
         kind: PickKind,
-        /// 本地侧完整内容(符号链接为链接目标);None 表示该侧已删除
+        /// 本地侧完整内容(符号链接为链接目标,子模块为提交 id);None 表示该侧已删除
         ours: Option<Vec<u8>>,
         /// 远端侧完整内容;None 表示该侧已删除
         theirs: Option<Vec<u8>>,

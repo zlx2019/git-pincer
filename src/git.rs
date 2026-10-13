@@ -65,13 +65,15 @@ impl RepoState {
 
 /// 符号链接在 index 中的 mode。
 const MODE_SYMLINK: u32 = 0o120000;
+/// 子模块(gitlink)在 index 中的 mode。
+const MODE_GITLINK: u32 = 0o160000;
 
 /// 冲突文件某个 stage 在 index 中的条目。
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Stage {
-    /// 文件 mode(如 0o100644 普通文件、0o120000 符号链接)
+    /// 文件 mode(如 0o100644 普通文件、0o120000 符号链接、0o160000 子模块)
     pub mode: u32,
-    /// blob oid
+    /// 对象 id:普通文件与符号链接为 blob,子模块为其提交
     pub oid: String,
 }
 
@@ -95,10 +97,21 @@ impl ConflictedFile {
     /// 是否涉及符号链接(任一 stage 为链接):链接目标不能按文本合并,
     /// 也不能经文件系统写入(会写穿到链接指向的文件),只能整条取用一侧。
     pub fn is_symlink(&self) -> bool {
+        self.has_mode(MODE_SYMLINK)
+    }
+
+    /// 是否涉及子模块(任一 stage 为 gitlink):其提交在子模块仓库而非本仓库
+    /// 的对象库中,无法读取内容,只能整条取用一侧记录的提交。
+    pub fn is_submodule(&self) -> bool {
+        self.has_mode(MODE_GITLINK)
+    }
+
+    /// 是否有任一 stage 为指定 mode。
+    fn has_mode(&self, mode: u32) -> bool {
         [&self.base, &self.ours, &self.theirs]
             .into_iter()
             .flatten()
-            .any(|stage| stage.mode == MODE_SYMLINK)
+            .any(|stage| stage.mode == mode)
     }
 }
 
@@ -471,9 +484,10 @@ impl Git {
     }
 
     /// 整条取用冲突文件的某一侧(`stage` 为 2 本地 / 3 远端),用于不能按内容
-    /// 合并、也不能经文件系统写入的冲突(如符号链接),做法与 git mergetool 一致:
-    /// 该侧存在时 `checkout-index -f` 检出该侧再 `git add`(git 先删除旧路径
-    /// 再创建,不会写穿链接,并遵循 core.symlinks);该侧已删除时 `git rm`。
+    /// 合并、也不能经文件系统写入的冲突(符号链接 / 子模块),做法与 git mergetool 一致:
+    /// - 子模块:只改 index(`update-index`),不动子模块工作区(其中可能有未推送的提交)
+    /// - 其余:该侧存在时 `checkout-index -f` 检出该侧再 `git add`(git 先删除旧路径
+    ///   再创建,不会写穿链接,并遵循 core.symlinks);该侧已删除时 `git rm`
     pub fn take_side(&self, file: &ConflictedFile, stage: u8) -> Result<(), GitError> {
         let chosen = match stage {
             2 => &file.ours,
@@ -486,6 +500,18 @@ impl Git {
             }
         };
         let path = file.path.as_str();
+        if file.is_submodule() {
+            match chosen {
+                Some(entry) => {
+                    let info = format!("{:o},{},{path}", entry.mode, entry.oid);
+                    self.run_ok(&["update-index", "--cacheinfo", &info])?;
+                }
+                None => {
+                    self.run_ok(&["update-index", "--force-remove", "--", path])?;
+                }
+            }
+            return Ok(());
+        }
         if chosen.is_none() {
             self.run_ok(&["--literal-pathspecs", "rm", "-q", "--", path])?;
             return Ok(());
@@ -622,6 +648,15 @@ mod tests {
         assert!(files[1].is_symlink() && files[1].theirs.is_none());
         // mode 非法的条目被跳过
         assert!(parse_ls_files_unmerged("12x000 aaaa 2\tbad\x00").is_empty());
+    }
+
+    /// 任一 stage 为 gitlink 即视为子模块冲突
+    #[test]
+    fn detects_submodule_stages() {
+        let text = "160000 aaaa 1\tsub\x00160000 bbbb 2\tsub\x00160000 cccc 3\tsub\x00";
+        let files = parse_ls_files_unmerged(text);
+        assert!(files[0].is_submodule() && !files[0].is_symlink());
+        assert_eq!(files[0].theirs.as_ref().map(|s| s.mode), Some(MODE_GITLINK));
     }
 
     #[test]

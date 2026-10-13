@@ -144,10 +144,11 @@ fn pick_notice(kind: PickKind) -> &'static str {
     match kind {
         PickKind::File => tr("ui.binary_notice"),
         PickKind::Symlink => tr("ui.symlink_notice"),
+        PickKind::Submodule => tr("ui.submodule_notice"),
     }
 }
 
-/// 卡片上一侧内容的摘要:已删除 / 链接目标 / 字节数。
+/// 卡片上一侧内容的摘要:已删除 / 链接目标 / 子模块提交 / 字节数。
 fn side_summary(kind: PickKind, content: Option<&[u8]>) -> String {
     let Some(content) = content else {
         return tr("ui.side_deleted").to_owned();
@@ -158,6 +159,11 @@ fn side_summary(kind: PickKind, content: Option<&[u8]>) -> String {
             "ui.link_target",
             &[("target", &String::from_utf8_lossy(content))],
         ),
+        PickKind::Submodule => {
+            // 提交 id 取前 7 位短格式,与 git log --oneline 一致
+            let id = String::from_utf8_lossy(content);
+            tr_f("ui.commit_id", &[("id", id.get(..7).unwrap_or(&id))])
+        }
     }
 }
 
@@ -593,5 +599,21 @@ mod tests {
         assert!(content.contains("Symlink"));
         assert!(content.contains("→ b.txt"));
         assert!(content.contains("(deleted)"));
+    }
+
+    /// 子模块条目:卡片展示两侧记录的短提交 id
+    #[test]
+    fn draw_submodule_entry_shows_commits() {
+        let content = render_entry(FileEntry::Pick {
+            path: "vendor/lib".to_owned(),
+            kind: PickKind::Submodule,
+            ours: Some(b"2222222222222222222222222222222222222222".to_vec()),
+            theirs: Some(b"3333333333333333333333333333333333333333".to_vec()),
+            choice: None,
+        });
+        assert!(content.contains("Submodule"));
+        assert!(content.contains("commit 2222222"));
+        assert!(content.contains("commit 3333333"));
+        assert!(!content.contains("22222222"), "应展示 7 位短 id");
     }
 }
