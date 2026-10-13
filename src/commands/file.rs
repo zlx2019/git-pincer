@@ -10,14 +10,14 @@ use crate::i18n::{tr, tr_f};
 use crate::merge::parse_conflict_file;
 use crate::ui::{self, Outcome};
 
-/// file 子命令参数。
+/// Arguments for the file subcommand.
 #[derive(Debug, Args)]
 pub struct FileArgs {
-    /// 带 `<<<<<<< / ======= / >>>>>>>` 冲突标记的文件路径
+    /// Path to a file containing `<<<<<<< / ======= / >>>>>>>` conflict markers
     pub path: PathBuf,
 }
 
-/// 运行单文件冲突解决。
+/// Resolve conflicts in a single file.
 pub fn run(args: FileArgs, light: bool) -> Result<()> {
     let text = std::fs::read_to_string(&args.path)
         .with_context(|| format!("failed to read {}", args.path.display()))?;

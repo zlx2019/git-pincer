@@ -7,29 +7,29 @@
 use std::collections::HashMap;
 use std::sync::OnceLock;
 
-/// 支持的界面语言。
+/// Supported UI languages.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Lang {
-    /// 中文
+    /// Chinese
     Zh,
-    /// 英文
+    /// English
     En,
 }
 
-/// 英文文案(基准,key 全集)。
+/// English catalog (the reference set of all keys).
 const EN: &str = include_str!("../locales/en.conf");
-/// 中文文案。
+/// Chinese catalog.
 const ZH: &str = include_str!("../locales/zh.conf");
 
-/// 当前语言;未初始化时按英文处理。
+/// Active language; defaults to English before initialization.
 static LANG: OnceLock<Lang> = OnceLock::new();
 
-/// 设定界面语言(进程内仅首次调用生效,应在入口尽早调用)。
+/// Set the UI language; only the first call takes effect, so initialize early.
 pub fn init(lang: Lang) {
     let _ = LANG.set(lang);
 }
 
-/// 探测系统语言:locale 为 zh 前缀(如 zh-CN)时用中文,其余用英文。
+/// Detect the system language: Chinese for a zh locale prefix, English otherwise.
 pub fn detect() -> Lang {
     match sys_locale::get_locale() {
         Some(l) if l.to_ascii_lowercase().starts_with("zh") => Lang::Zh,
@@ -37,7 +37,7 @@ pub fn detect() -> Lang {
     }
 }
 
-/// 取当前语言的文案:当前语言缺失回退英文,再缺失返回 key 本身。
+/// Look up a message, falling back to English and then to the key itself.
 pub fn tr(key: &'static str) -> &'static str {
     let lang = LANG.get().copied().unwrap_or(Lang::En);
     if lang == Lang::Zh
@@ -48,8 +48,8 @@ pub fn tr(key: &'static str) -> &'static str {
     table(Lang::En).get(key).map_or(key, String::as_str)
 }
 
-/// 取文案并替换命名占位符:`args` 为 `(名称, 值)` 列表,
-/// 文案中的 `{名称}` 会被逐个替换。
+/// Look up a message and replace named placeholders using `(name, value)` pairs.
+/// Each `{name}` in the message is replaced in sequence.
 pub fn tr_f(key: &'static str, args: &[(&str, &str)]) -> String {
     let mut text = tr(key).to_owned();
     for (name, value) in args {
@@ -58,7 +58,7 @@ pub fn tr_f(key: &'static str, args: &[(&str, &str)]) -> String {
     text
 }
 
-/// 语言对应的文案表(进程内每种语言只解析一次)。
+/// Get a language's message table, parsed once per language in the process.
 fn table(lang: Lang) -> &'static HashMap<&'static str, String> {
     static EN_TABLE: OnceLock<HashMap<&'static str, String>> = OnceLock::new();
     static ZH_TABLE: OnceLock<HashMap<&'static str, String>> = OnceLock::new();
@@ -68,7 +68,7 @@ fn table(lang: Lang) -> &'static HashMap<&'static str, String> {
     }
 }
 
-/// 解析 conf 文案:每行 `key = value`,`#` 注释,`\n` 转义为换行。
+/// Parse conf messages: `key = value` lines, `#` comments, and `\n` newline escapes.
 fn parse(src: &'static str) -> HashMap<&'static str, String> {
     let mut map = HashMap::new();
     for line in src.lines() {
@@ -88,7 +88,7 @@ fn parse(src: &'static str) -> HashMap<&'static str, String> {
 mod tests {
     use super::*;
 
-    /// conf 解析:注释、空行、含 = 的 value、\n 转义
+    /// Parse comments, empty lines, values containing =, and newline escapes.
     #[test]
     fn parses_conf_lines() {
         let map = parse("# comment\n\na.b = hello = world\nc = line1\\nline2\n");
@@ -97,7 +97,7 @@ mod tests {
         assert_eq!(map.len(), 2);
     }
 
-    /// en 与 zh 的 key 集合必须完全一致,漏翻直接报出差集
+    /// English and Chinese key sets must match; report missing translations.
     #[test]
     fn catalogs_have_identical_keys() {
         let en: std::collections::BTreeSet<_> = table(Lang::En).keys().collect();
@@ -106,11 +106,11 @@ mod tests {
         let only_zh: Vec<_> = zh.difference(&en).collect();
         assert!(
             only_en.is_empty() && only_zh.is_empty(),
-            "en 独有: {only_en:?}; zh 独有: {only_zh:?}"
+            "English-only keys: {only_en:?}; Chinese-only keys: {only_zh:?}"
         );
     }
 
-    /// 两份文案的占位符集合必须一致(防止翻译丢参数)
+    /// Both catalogs must have matching placeholders to avoid missing arguments.
     #[test]
     fn placeholders_match_between_catalogs() {
         let holes = |s: &str| -> std::collections::BTreeSet<String> {
@@ -131,12 +131,12 @@ mod tests {
             assert_eq!(
                 holes(en_val),
                 holes(zh_val),
-                "key {key} 的占位符在两份文案中不一致"
+                "placeholders for key {key} differ between catalogs"
             );
         }
     }
 
-    /// 未初始化 / 缺失 key 的回退行为
+    /// Fallback behavior before initialization and for missing keys.
     #[test]
     fn lookup_falls_back() {
         assert_eq!(tr("no.such.key"), "no.such.key");

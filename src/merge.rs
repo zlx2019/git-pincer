@@ -13,51 +13,51 @@ use std::time::Duration;
 
 use similar::{Algorithm, DiffTag, TextDiff};
 
-/// 单次 diff 的最长计算时间,超时后 similar 会降级为较粗粒度的结果,
-/// 保证超大文件下 TUI 仍能及时进入交互。
+/// Maximum time per diff; similar falls back to coarser results on timeout,
+/// keeping TUI startup responsive even for very large files.
 const DIFF_TIMEOUT: Duration = Duration::from_millis(500);
 
-/// 合并块的类型。
+/// Merge chunk classification.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum ChunkKind {
-    /// 双方均未改动,内容与 base 一致
+    /// Neither side changed; content matches base
     Stable,
-    /// 仅本地(ours)改动,可无冲突应用
+    /// Only local (ours) changed; applies without conflict
     Ours,
-    /// 仅远端(theirs)改动,可无冲突应用
+    /// Only remote (theirs) changed; applies without conflict
     Theirs,
-    /// 双方改动且内容一致,可无冲突应用
+    /// Both sides made identical changes; applies without conflict
     Agree,
-    /// 双方改动且内容不同,需人工解决
+    /// Both sides made different changes; requires manual resolution
     Conflict,
 }
 
-/// 一个合并块:base 的某个连续区间以及双方在该区间的内容。
+/// A contiguous base range and both sides' content for that range.
 #[derive(Debug, Clone)]
 pub struct MergeChunk {
-    /// 块序号,供交互层定位操作
+    /// Chunk index used by the interactive layer
     pub id: usize,
-    /// 块类型
+    /// Chunk classification
     pub kind: ChunkKind,
-    /// base 在该区间的行内容(已去行尾换行)
+    /// Base lines in this range, without line endings
     pub base: Vec<String>,
-    /// 本地侧在该区间的行内容;稳定块不重复存储(为空),
-    /// 读取应使用 [`Self::ours_lines`]
+    /// Local lines in this range; empty for stable chunks to avoid duplication.
+    /// Read through [`Self::ours_lines`]
     pub ours: Vec<String>,
-    /// 远端侧在该区间的行内容;稳定块不重复存储(为空),
-    /// 读取应使用 [`Self::theirs_lines`]
+    /// Remote lines in this range; empty for stable chunks to avoid duplication.
+    /// Read through [`Self::theirs_lines`]
     pub theirs: Vec<String>,
-    /// base 侧起始行号(1-based)
+    /// Starting base line number (1-based)
     pub base_start: usize,
-    /// 本地侧起始行号(1-based)
+    /// Starting local line number (1-based)
     pub ours_start: usize,
-    /// 远端侧起始行号(1-based)
+    /// Starting remote line number (1-based)
     pub theirs_start: usize,
 }
 
 impl MergeChunk {
-    /// 本地侧行内容;稳定块双方与 base 一致,共用 base 的存储
-    /// (避免整个文件的稳定区内容被复制三份)。
+    /// Local lines; stable chunks share base storage because both sides are identical,
+    /// avoiding three copies of unchanged file content.
     pub fn ours_lines(&self) -> &[String] {
         if self.kind == ChunkKind::Stable {
             &self.base
@@ -66,7 +66,7 @@ impl MergeChunk {
         }
     }
 
-    /// 远端侧行内容;稳定块双方与 base 一致,共用 base 的存储。
+    /// Remote lines; stable chunks share base storage because both sides are identical.
     pub fn theirs_lines(&self) -> &[String] {
         if self.kind == ChunkKind::Stable {
             &self.base
@@ -76,49 +76,49 @@ impl MergeChunk {
     }
 }
 
-/// 三方合并的完整结果:按文件顺序排列的块 + 统计信息。
+/// Complete three-way merge result: chunks in file order and statistics.
 #[derive(Debug, Clone)]
 pub struct MergeResult {
-    /// 全部合并块,首尾相接覆盖整个文件
+    /// Contiguous merge chunks covering the entire file
     pub chunks: Vec<MergeChunk>,
-    /// 冲突块数量
+    /// Number of conflict chunks
     pub conflicts: usize,
-    /// 仅本地改动的块数量
+    /// Number of local-only change chunks
     pub ours_changes: usize,
-    /// 仅远端改动的块数量
+    /// Number of remote-only change chunks
     pub theirs_changes: usize,
-    /// 双方一致改动的块数量
+    /// Number of identical-change chunks
     pub agree: usize,
-    /// 本地侧标签(来自 `<<<<<<<` 后的分支名;三方模式下为 None)
+    /// Local label from the branch name after `<<<<<<<`; None in three-way mode
     pub ours_label: Option<String>,
-    /// 远端侧标签(来自 `>>>>>>>` 后的分支名;三方模式下为 None)
+    /// Remote label from the branch name after `>>>>>>>`; None in three-way mode
     pub theirs_label: Option<String>,
 }
 
-/// 单侧 hunk:base 的某个行区间被替换为新的行内容。
+/// A single-side hunk replacing a base line range with new lines.
 #[derive(Debug, Clone)]
 struct Hunk {
-    /// 被替换的 base 行区间(左闭右开;纯插入时为空区间)
+    /// Replaced half-open base range; empty for a pure insertion
     base_range: Range<usize>,
-    /// 替换后的行内容(已去行尾换行)
+    /// Replacement lines without line endings
     lines: Vec<String>,
 }
 
-/// hunk 的来源侧。
+/// Side that produced a hunk.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 enum Side {
     Ours,
     Theirs,
 }
 
-/// 带侧别标记的 hunk,分组时两侧混排使用。
+/// A side-tagged hunk, allowing both sides to be sorted together for grouping.
 #[derive(Debug, Clone)]
 struct SidedHunk {
     side: Side,
     hunk: Hunk,
 }
 
-/// 对三份文本执行三方合并,返回按文件顺序排列的合并块与统计信息。
+/// Merge three texts into chunks in file order, with statistics.
 pub fn merge_text(base: &str, ours: &str, theirs: &str) -> MergeResult {
     let ours_diff = TextDiff::configure()
         .algorithm(Algorithm::Myers)
@@ -129,7 +129,7 @@ pub fn merge_text(base: &str, ours: &str, theirs: &str) -> MergeResult {
         .timeout(DIFF_TIMEOUT)
         .diff_lines(base, theirs);
 
-    // base 行以 similar 的分词为准,保证与 op 的区间下标一致
+    // Use similar's base line boundaries to keep operation range indices aligned.
     let base_lines: Vec<String> = (0..ours_diff.old_len())
         .filter_map(|i| ours_diff.old_slice(i))
         .map(clean_line)
@@ -139,19 +139,19 @@ pub fn merge_text(base: &str, ours: &str, theirs: &str) -> MergeResult {
     build_chunks(&base_lines, groups)
 }
 
-/// 去除行尾换行符(\n 或 \r\n)。
+/// Strip line endings (\n or \r\n).
 fn clean_line(line: &str) -> String {
     line.trim_end_matches(['\r', '\n']).to_owned()
 }
 
-/// 从一次 2-way diff 中提取全部非 Equal 操作为 hunk。
+/// Extract all non-Equal operations from a two-way diff as hunks.
 fn extract_hunks(diff: &TextDiff<'_, '_, str>) -> Vec<Hunk> {
     diff.ops()
         .iter()
         .filter(|op| op.tag() != DiffTag::Equal)
         .map(|op| Hunk {
             base_range: op.old_range(),
-            // 合法区间内 new_slice 必然有值,filter_map 仅为规避 unwrap
+            // new_slice exists within valid ranges; filter_map avoids unwrap.
             lines: op
                 .new_range()
                 .filter_map(|i| diff.new_slice(i))
@@ -161,11 +161,11 @@ fn extract_hunks(diff: &TextDiff<'_, '_, str>) -> Vec<Hunk> {
         .collect()
 }
 
-/// 判断两个 base 区间是否「碰撞」(需归入同一组处理)。
+/// Whether two base ranges collide and must be grouped together.
 ///
-/// 保守策略:空区间(纯插入)与另一区间端点相接也算碰撞,宁可多报冲突,
-/// 也不冒险静默合并出错误结果;两个非空区间仅端点相接则不算碰撞,
-/// 双方改动可独立应用。
+/// Conservatively treat an insertion touching another range's endpoint as a collision,
+/// preferring an extra conflict over an incorrect automatic merge. Nonempty ranges
+/// that only share an endpoint remain independent.
 fn collides(a: &Range<usize>, b: &Range<usize>) -> bool {
     match (a.is_empty(), b.is_empty()) {
         (true, true) => a.start == b.start,
@@ -175,7 +175,7 @@ fn collides(a: &Range<usize>, b: &Range<usize>) -> bool {
     }
 }
 
-/// 将两侧 hunk 按 base 区间的碰撞关系归并成组,组内保持 base 起点有序。
+/// Group both sides' hunks by base-range collisions, ordered by base start within groups.
 fn group_hunks(ours: Vec<Hunk>, theirs: Vec<Hunk>) -> Vec<Vec<SidedHunk>> {
     let mut all: Vec<SidedHunk> = ours
         .into_iter()
@@ -188,7 +188,7 @@ fn group_hunks(ours: Vec<Hunk>, theirs: Vec<Hunk>) -> Vec<Vec<SidedHunk>> {
             hunk,
         }))
         .collect();
-    // 按 base 起点排序;同起点时 ours 在前,保证结果确定性
+    // Sort by base start, placing ours first for matching ranges to keep results deterministic.
     all.sort_by_key(|s| {
         (
             s.hunk.base_range.start,
@@ -197,7 +197,7 @@ fn group_hunks(ours: Vec<Hunk>, theirs: Vec<Hunk>) -> Vec<Vec<SidedHunk>> {
         )
     });
 
-    // 已排序前提下,只需用组的合并区间与下一个 hunk 判碰撞即可传递扩张
+    // Sorted hunks let each group's union range expand transitively on collisions.
     let mut groups: Vec<(Range<usize>, Vec<SidedHunk>)> = Vec::new();
     for sided in all {
         let range = sided.hunk.base_range.clone();
@@ -213,8 +213,8 @@ fn group_hunks(ours: Vec<Hunk>, theirs: Vec<Hunk>) -> Vec<Vec<SidedHunk>> {
     groups.into_iter().map(|(_, members)| members).collect()
 }
 
-/// 计算某一侧在组合 base 区间 [lo, hi) 内的最终内容:
-/// 未被该侧 hunk 覆盖的 base 行保持原样,被覆盖处使用替换行。
+/// Compute one side's final content for the combined base range [lo, hi):
+/// preserve untouched base lines and substitute replacement lines for its hunks.
 fn side_content(
     base_lines: &[String],
     lo: usize,
@@ -233,7 +233,7 @@ fn side_content(
     out
 }
 
-/// 由 hunk 组构建首尾相接的合并块序列,并统计各类块数量。
+/// Build contiguous merge chunks from hunk groups and count each chunk kind.
 fn build_chunks(base_lines: &[String], groups: Vec<Vec<SidedHunk>>) -> MergeResult {
     let mut chunks: Vec<MergeChunk> = Vec::new();
     let mut conflicts = 0usize;
@@ -241,13 +241,13 @@ fn build_chunks(base_lines: &[String], groups: Vec<Vec<SidedHunk>>) -> MergeResu
     let mut theirs_changes = 0usize;
     let mut agree = 0usize;
 
-    // 三侧各自的行号游标(1-based)与 base 消费位置
+    // Per-side line cursors (1-based) and the consumed base position.
     let mut base_pos = 0usize;
     let mut base_no = 1usize;
     let mut ours_no = 1usize;
     let mut theirs_no = 1usize;
 
-    // 追加一个稳定块;双方内容与 base 一致,只存 base 一份
+    // Append a stable chunk, storing only base because both sides match it.
     let push_stable = |chunks: &mut Vec<MergeChunk>,
                        lines: &[String],
                        base_no: &mut usize,
@@ -269,7 +269,7 @@ fn build_chunks(base_lines: &[String], groups: Vec<Vec<SidedHunk>>) -> MergeResu
     };
 
     for group in groups {
-        // 组的组合 base 区间(组必非空,unwrap_or 仅为规避 unwrap)
+        // Combined base range of a nonempty group; unwrap_or avoids unwrap.
         let lo = group
             .iter()
             .map(|s| s.hunk.base_range.start)
@@ -281,7 +281,7 @@ fn build_chunks(base_lines: &[String], groups: Vec<Vec<SidedHunk>>) -> MergeResu
             .max()
             .unwrap_or(lo);
 
-        // 组之前的稳定区
+        // Stable region preceding this group.
         if lo > base_pos {
             push_stable(
                 &mut chunks,
@@ -327,7 +327,7 @@ fn build_chunks(base_lines: &[String], groups: Vec<Vec<SidedHunk>>) -> MergeResu
         base_pos = hi;
     }
 
-    // 末尾的稳定区
+    // Trailing stable region.
     if base_pos < base_lines.len() {
         push_stable(
             &mut chunks,
@@ -349,46 +349,46 @@ fn build_chunks(base_lines: &[String], groups: Vec<Vec<SidedHunk>>) -> MergeResu
     }
 }
 
-/// 冲突文件解析错误。
+/// Conflict-file parsing error.
 #[derive(Debug, thiserror::Error)]
 pub enum ConflictParseError {
-    /// 整个文件没有任何冲突标记
+    /// No conflict markers anywhere in the file
     #[error("未检测到 git 冲突标记(<<<<<<< / ======= / >>>>>>>)")]
     NoMarkers,
-    /// 冲突标记不完整或顺序错误
+    /// Incomplete or out-of-order conflict markers
     #[error("第 {0} 行附近的冲突标记不完整或顺序错误")]
     Malformed(usize),
 }
 
-/// 解析时当前正在收集的冲突段落。
+/// Conflict section currently being collected by the parser.
 enum Section {
-    /// 冲突块之外的公共内容
+    /// Common content outside conflict chunks
     Common,
-    /// `<<<<<<<` 之后的本地内容
+    /// Local content after `<<<<<<<`
     Ours,
-    /// `|||||||` 之后的 base 内容(diff3 风格才有)
+    /// Base content after `|||||||` (diff3 style only)
     Base,
-    /// `=======` 之后的远端内容
+    /// Remote content after `=======`
     Theirs,
 }
 
-/// 解析带 git 冲突标记的单个文件,还原为合并块序列。
+/// Parse a file with Git conflict markers into merge chunks.
 ///
-/// git 合并时非冲突改动已写入文件,因此结果只含 Stable 与 Conflict 两类块;
-/// 支持默认(merge)与 diff3 两种 conflictStyle,并提取 `<<<<<<< / >>>>>>>`
-/// 后的分支标签。默认风格没有 base 段,冲突块的 base 为空。
+/// Git has already applied non-conflicting changes, so only Stable and Conflict
+/// chunks remain. Supports default (merge) and diff3 conflictStyle, extracting
+/// labels after `<<<<<<< / >>>>>>>`. Default-style conflicts have no base section.
 pub fn parse_conflict_file(text: &str) -> Result<MergeResult, ConflictParseError> {
     let mut chunks: Vec<MergeChunk> = Vec::new();
     let mut conflicts = 0usize;
     let mut ours_label: Option<String> = None;
     let mut theirs_label: Option<String> = None;
 
-    // 三侧各自的行号游标(1-based),指向重建后的各侧文档位置
+    // Per-side line cursors (1-based) track positions in the reconstructed documents.
     let mut base_no = 1usize;
     let mut ours_no = 1usize;
     let mut theirs_no = 1usize;
 
-    // 各段落的行缓冲
+    // Line buffers for each section.
     let mut common: Vec<String> = Vec::new();
     let mut ours: Vec<String> = Vec::new();
     let mut base: Vec<String> = Vec::new();
@@ -396,7 +396,7 @@ pub fn parse_conflict_file(text: &str) -> Result<MergeResult, ConflictParseError
     let mut section = Section::Common;
     let mut conflict_start = 0usize;
 
-    // 把缓冲的公共段落收为一个稳定块(只存 base 一份)
+    // Flush buffered common content into a stable chunk, storing only base.
     let flush_common = |chunks: &mut Vec<MergeChunk>,
                         common: &mut Vec<String>,
                         base_no: &mut usize,
@@ -427,7 +427,7 @@ pub fn parse_conflict_file(text: &str) -> Result<MergeResult, ConflictParseError
         let line_no = idx + 1;
 
         if let Some(rest) = line.strip_prefix("<<<<<<<") {
-            // 冲突开始;嵌套的 <<<<<<< 视为格式错误
+            // Start of a conflict; nested <<<<<<< markers are malformed.
             if !matches!(section, Section::Common) {
                 return Err(ConflictParseError::Malformed(line_no));
             }
@@ -491,7 +491,7 @@ pub fn parse_conflict_file(text: &str) -> Result<MergeResult, ConflictParseError
         }
     }
 
-    // 文件结束时仍在冲突块内 → 标记不完整
+    // Reaching EOF inside a conflict means the markers are incomplete.
     if !matches!(section, Section::Common) {
         return Err(ConflictParseError::Malformed(conflict_start));
     }
@@ -521,7 +521,7 @@ pub fn parse_conflict_file(text: &str) -> Result<MergeResult, ConflictParseError
 mod tests {
     use super::*;
 
-    /// 提取块类型序列,便于断言整体结构
+    /// Extract chunk kinds for assertions on the overall structure.
     fn kinds(result: &MergeResult) -> Vec<ChunkKind> {
         result.chunks.iter().map(|c| c.kind).collect()
     }
@@ -617,7 +617,7 @@ mod tests {
 
     #[test]
     fn line_numbers_track_each_side() {
-        // ours 在 a 后插入两行,theirs 修改 c;两处改动互不碰撞
+        // Ours inserts two lines after a; theirs changes c. The changes do not collide.
         let result = merge_text("a\nb\nc\n", "a\nx\ny\nb\nc\n", "a\nb\nC\n");
         assert_eq!(
             kinds(&result),
@@ -646,7 +646,7 @@ mod tests {
         }
     }
 
-    // —— 冲突文件解析 ——
+    // Conflict-file parsing
 
     #[test]
     fn parses_standard_conflict_markers() {
@@ -686,10 +686,10 @@ mod tests {
         let result = parse_conflict_file(text).unwrap();
         assert_eq!(result.conflicts, 2);
         assert!(result.ours_label.is_none());
-        // 第二个冲突的行号应累计前面所有内容
+        // The second conflict's line numbers include all preceding content.
         let second = &result.chunks[3];
-        assert_eq!(second.ours_start, 4); // a, x, b 之后
-        assert_eq!(second.theirs_start, 4); // a, y, b 之后
+        assert_eq!(second.ours_start, 4); // After a, x, b.
+        assert_eq!(second.theirs_start, 4); // After a, y, b.
     }
 
     #[test]
@@ -718,7 +718,7 @@ mod tests {
 
     #[test]
     fn separator_outside_conflict_is_content() {
-        // 公共区域里恰好出现 ======= 行(如 RST 标题)不应被当作标记
+        // A ======= line in common content, such as an RST heading, is not a marker.
         let text = "title\n=======\n<<<<<<<\nx\n=======\ny\n>>>>>>>\n";
         let result = parse_conflict_file(text).unwrap();
         assert_eq!(result.chunks[0].base, vec!["title", "======="]);

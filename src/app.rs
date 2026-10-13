@@ -8,41 +8,41 @@
 
 use crate::merge::{ChunkKind, MergeChunk, MergeResult, merge_text};
 
-/// 取用方向(改动来源侧)。
+/// Side from which to take a change.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Side {
-    /// 本地(左栏)
+    /// Local (left pane)
     Ours,
-    /// 远端(右栏)
+    /// Remote (right pane)
     Theirs,
 }
 
-/// 一侧改动的处理状态。
+/// Resolution state of one side's change.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum SideState {
-    /// 待处理
+    /// Awaiting a decision
     Pending,
-    /// 已取用进结果
+    /// Applied to the result
     Applied,
-    /// 已忽略(不进入结果)
+    /// Ignored (excluded from the result)
     Ignored,
 }
 
-/// 单个块的解决状态。
+/// Resolution state of a single chunk.
 #[derive(Debug, Clone)]
 pub struct ChunkState {
-    /// 本地侧状态
+    /// Local side state
     pub ours: SideState,
-    /// 远端侧状态
+    /// Remote side state
     pub theirs: SideState,
-    /// 取用顺序,决定内容拼接顺序
+    /// Take order, which determines content concatenation order
     pub order: Vec<Side>,
-    /// $EDITOR 手动编辑后的整块覆写内容
+    /// Whole-chunk override from manual editing in $EDITOR
     pub override_lines: Option<Vec<String>>,
 }
 
 impl ChunkState {
-    /// 初始待处理状态。
+    /// Initial pending state.
     fn new() -> Self {
         Self {
             ours: SideState::Pending,
@@ -52,7 +52,7 @@ impl ChunkState {
         }
     }
 
-    /// 读取某一侧的状态。
+    /// Read the state of one side.
     fn side(&self, side: Side) -> SideState {
         match side {
             Side::Ours => self.ours,
@@ -60,7 +60,7 @@ impl ChunkState {
         }
     }
 
-    /// 写入某一侧的状态。
+    /// Set the state of one side.
     fn set_side(&mut self, side: Side, state: SideState) {
         match side {
             Side::Ours => self.ours = state,
@@ -69,7 +69,7 @@ impl ChunkState {
     }
 }
 
-/// 块上有待处理改动的侧:单侧块只有对应一侧,agree / conflict 两侧都有。
+/// Sides with changes: one for single-sided chunks, both for agreement or conflict.
 fn effective_sides(kind: ChunkKind) -> &'static [Side] {
     match kind {
         ChunkKind::Ours => &[Side::Ours],
@@ -79,39 +79,39 @@ fn effective_sides(kind: ChunkKind) -> &'static [Side] {
     }
 }
 
-/// 一个文本文件的合并会话:块列表 + 各块解决状态 + 光标。
+/// Merge session for one text file: chunks, resolution states, and cursor.
 #[derive(Debug)]
 pub struct FileMerge {
-    /// 文件路径(git 模式为仓库根相对;单文件模式为输入路径)
+    /// File path (repository-relative in Git mode; input path in file mode)
     pub path: String,
-    /// 合并块,首尾相接覆盖整个文件
+    /// Contiguous merge chunks covering the entire file
     pub chunks: Vec<MergeChunk>,
-    /// 与 chunks 一一对应的解决状态
+    /// Resolution states corresponding one-to-one with chunks
     pub states: Vec<ChunkState>,
-    /// 光标所在块下标(始终指向非 Stable 块;无改动块时为 0)
+    /// Cursor chunk index (a non-Stable chunk, or 0 if there are no changes)
     pub cursor: usize,
-    /// 视口滚动行偏移(由 UI 维护)
+    /// Vertical viewport offset in rows, managed by the UI
     pub scroll: usize,
-    /// 视口水平平移列偏移(显示列;三栏共用,由 UI 维护)
+    /// Horizontal viewport offset in display columns, shared by all panes and managed by the UI
     pub hscroll: usize,
-    /// 视口是否跟随光标块(手动滚动后为 false,作用于光标的动作恢复跟随)
+    /// Whether the viewport follows the cursor; manual scrolling disables it, cursor actions restore it
     pub follow: bool,
-    /// 本地侧栏头标签(分支名)
+    /// Local pane header label (branch name)
     pub ours_label: Option<String>,
-    /// 远端侧栏头标签(分支名)
+    /// Remote pane header label (branch name)
     pub theirs_label: Option<String>,
-    /// 任一原始输入以换行结尾时,导出内容补末尾换行
+    /// Append a trailing newline on export if any original input had one
     ends_with_newline: bool,
 }
 
 impl FileMerge {
-    /// 由三份完整文本构建(git 三方模式)。
+    /// Build from three complete texts (Git three-way mode).
     pub fn from_three_way(path: String, base: &str, ours: &str, theirs: &str) -> Self {
         let ends = base.ends_with('\n') || ours.ends_with('\n') || theirs.ends_with('\n');
         Self::from_result(path, merge_text(base, ours, theirs), ends)
     }
 
-    /// 由已计算好的合并结果构建(冲突文件解析模式)。
+    /// Build from a computed merge result (conflict-file parsing mode).
     pub fn from_result(path: String, result: MergeResult, ends_with_newline: bool) -> Self {
         let states = result.chunks.iter().map(|_| ChunkState::new()).collect();
         let cursor = result
@@ -133,9 +133,9 @@ impl FileMerge {
         }
     }
 
-    // —— 查询 ——
+    // Queries
 
-    /// 某块是否已处理完毕(被覆写,或所有有效侧均非待处理)。
+    /// Whether a chunk is overridden or all its effective sides have been handled.
     pub fn chunk_resolved(&self, idx: usize) -> bool {
         let state = &self.states[idx];
         if state.override_lines.is_some() {
@@ -146,26 +146,26 @@ impl FileMerge {
             .all(|&side| state.side(side) != SideState::Pending)
     }
 
-    /// 未处理完的冲突块数量(写盘的先决条件是归零)。
+    /// Number of unresolved conflict chunks; must be zero before writing.
     pub fn pending_conflicts(&self) -> usize {
         (0..self.chunks.len())
             .filter(|&i| self.chunks[i].kind == ChunkKind::Conflict && !self.chunk_resolved(i))
             .count()
     }
 
-    /// 未处理完的改动块总数(含非冲突,状态条展示用)。
+    /// Number of unresolved changes, including non-conflicts, for the status bar.
     pub fn pending_changes(&self) -> usize {
         (0..self.chunks.len())
             .filter(|&i| self.chunks[i].kind != ChunkKind::Stable && !self.chunk_resolved(i))
             .count()
     }
 
-    /// 文件是否可写盘:所有冲突块已解决(非冲突块保持待处理 = 保留 base)。
+    /// Whether all conflicts are resolved; pending non-conflict chunks retain base content.
     pub fn ready_to_write(&self) -> bool {
         self.pending_conflicts() == 0
     }
 
-    /// 某块当前在结果中的内容:覆写 > 按取用顺序拼接 > base。
+    /// Current chunk content: override > concatenation in take order > base.
     pub fn current_content(&self, idx: usize) -> Vec<String> {
         let chunk = &self.chunks[idx];
         let state = &self.states[idx];
@@ -188,7 +188,7 @@ impl FileMerge {
             .collect()
     }
 
-    /// 导出整个文件的最终内容(按块拼接 + 末尾换行策略)。
+    /// Export the final file content by joining chunks and applying the trailing-newline policy.
     pub fn resolved_content(&self) -> String {
         let lines: Vec<String> = (0..self.chunks.len())
             .flat_map(|i| self.current_content(i))
@@ -201,10 +201,10 @@ impl FileMerge {
         }
     }
 
-    // —— 操作(作用于光标所在块)——
+    // Operations on the cursor's chunk
 
-    /// 取用某一侧:内容按点击顺序追加(冲突两侧先后取用 =「两者都要」);
-    /// agree 块两侧内容一致,取任一侧即整块完成。
+    /// Take one side, appending content in take order; taking both sides keeps both.
+    /// For agreement chunks, taking either identical side resolves the whole chunk.
     pub fn apply(&mut self, side: Side) {
         let idx = self.cursor;
         let kind = self.chunks[idx].kind;
@@ -225,7 +225,7 @@ impl FileMerge {
         }
     }
 
-    /// 忽略某一侧(该侧改动不进入结果);agree 块忽略即整块保留 base。
+    /// Ignore a side's change; ignoring an agreement chunk retains its base content.
     pub fn ignore(&mut self, side: Side) {
         let idx = self.cursor;
         let kind = self.chunks[idx].kind;
@@ -244,24 +244,24 @@ impl FileMerge {
         }
     }
 
-    /// 撤销当前块的全部决定,回到待处理。
+    /// Undo all decisions for the current chunk, restoring its pending state.
     pub fn undo(&mut self) {
         self.states[self.cursor] = ChunkState::new();
     }
 
-    /// 撤销本文件所有块的决定(含 $EDITOR 覆写),全部回到待处理。
+    /// Undo all file decisions, including editor overrides, restoring pending states.
     pub fn undo_all(&mut self) {
         for state in &mut self.states {
             *state = ChunkState::new();
         }
     }
 
-    /// 用 $EDITOR 编辑后的内容覆写当前块(视为已解决)。
+    /// Override the current chunk with editor content and mark it resolved.
     pub fn set_override(&mut self, lines: Vec<String>) {
         self.states[self.cursor].override_lines = Some(lines);
     }
 
-    /// 一键取用所有非冲突改动(ours/theirs/agree)。
+    /// Apply all non-conflicting changes (ours / theirs / agreement).
     pub fn apply_all_nonconflict(&mut self) {
         let saved = self.cursor;
         for idx in 0..self.chunks.len() {
@@ -270,7 +270,7 @@ impl FileMerge {
                 continue;
             }
             self.cursor = idx;
-            // 有效侧的第一个即该块的改动来源(agree 取任一侧等价)
+            // The first effective side supplies the change; either side works for agreement.
             if let Some(&side) = effective_sides(kind).first() {
                 self.apply(side);
             }
@@ -278,9 +278,9 @@ impl FileMerge {
         self.cursor = saved;
     }
 
-    // —— 光标移动 ——
+    // Cursor movement
 
-    /// 移到下一个改动块(跳过 Stable)。
+    /// Move to the next changed chunk, skipping Stable chunks.
     pub fn next_change(&mut self) {
         if let Some(idx) =
             (self.cursor + 1..self.chunks.len()).find(|&i| self.chunks[i].kind != ChunkKind::Stable)
@@ -289,7 +289,7 @@ impl FileMerge {
         }
     }
 
-    /// 移到上一个改动块(跳过 Stable)。
+    /// Move to the previous changed chunk, skipping Stable chunks.
     pub fn prev_change(&mut self) {
         if let Some(idx) = (0..self.cursor)
             .rev()
@@ -299,7 +299,7 @@ impl FileMerge {
         }
     }
 
-    /// 跳到下一个未解决的冲突块(到底后从头环绕)。
+    /// Jump to the next unresolved conflict, wrapping at the end.
     pub fn next_conflict(&mut self) {
         let n = self.chunks.len();
         if let Some(idx) = (1..=n)
@@ -310,7 +310,7 @@ impl FileMerge {
         }
     }
 
-    /// 跳到上一个未解决的冲突块(到头后从尾环绕)。
+    /// Jump to the previous unresolved conflict, wrapping at the start.
     pub fn prev_conflict(&mut self) {
         let n = self.chunks.len();
         if let Some(idx) = (1..=n)
@@ -322,40 +322,40 @@ impl FileMerge {
     }
 }
 
-/// 整文件二选一条目的对象类型(决定卡片如何展示一侧的内容)。
+/// Object type for a whole-file pick, determining how each side is displayed.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum PickKind {
-    /// 普通文件(二进制文件,或一侧删除了该文件):展示字节数
+    /// Regular file (binary or deleted on one side): display byte count
     File,
-    /// 符号链接:展示链接目标
+    /// Symlink: display the link target
     Symlink,
-    /// 子模块:展示该侧记录的提交 id
+    /// Submodule: display the recorded commit ID
     Submodule,
 }
 
-/// 会话中的单个待解决文件。
+/// One file awaiting resolution in a session.
 #[derive(Debug)]
 pub enum FileEntry {
-    /// 文本文件:三栏逐块解决
+    /// Text file: resolve chunk by chunk in three panes
     Text(FileMerge),
-    /// 不能逐块合并的冲突(二进制文件 / 符号链接 / 子模块 / 修改-删除):
-    /// 降级为整条二选一
+    /// Conflicts that cannot be merged by chunk (binary / symlink / submodule / modify-delete)
+    /// fall back to choosing one whole side
     Pick {
-        /// 文件路径
+        /// File path
         path: String,
-        /// 对象类型
+        /// Object type
         kind: PickKind,
-        /// 本地侧完整内容(符号链接为链接目标,子模块为提交 id);None 表示该侧已删除
+        /// Complete local content (link target or commit ID for special objects); None means deleted
         ours: Option<Vec<u8>>,
-        /// 远端侧完整内容;None 表示该侧已删除
+        /// Complete remote content; None means deleted
         theirs: Option<Vec<u8>>,
-        /// 用户的选择
+        /// User's choice
         choice: Option<Side>,
     },
 }
 
 impl FileEntry {
-    /// 文件路径。
+    /// File path.
     pub fn path(&self) -> &str {
         match self {
             FileEntry::Text(m) => &m.path,
@@ -363,7 +363,7 @@ impl FileEntry {
         }
     }
 
-    /// 是否满足写盘条件。
+    /// Whether the file is ready to write.
     pub fn ready_to_write(&self) -> bool {
         match self {
             FileEntry::Text(m) => m.ready_to_write(),
@@ -371,10 +371,10 @@ impl FileEntry {
         }
     }
 
-    /// 导出最终字节内容(前提:ready_to_write);所选一侧已删除时为空。
+    /// Export final bytes when ready_to_write; empty if the chosen side is deleted.
     ///
-    /// git 模式下二选一条目经 git 整条取用一侧落盘(删除侧需删除文件,
-    /// 不能写成空文件),见 `commands::resolve::persist`。
+    /// Git mode persists whole-file picks through Git, deleting the file for a deleted
+    /// side rather than writing an empty file; see `commands::resolve::persist`.
     pub fn resolved_bytes(&self) -> Vec<u8> {
         match self {
             FileEntry::Text(m) => m.resolved_content().into_bytes(),
@@ -391,23 +391,23 @@ impl FileEntry {
     }
 }
 
-/// 多文件冲突解决会话。
+/// Conflict-resolution session spanning multiple files.
 #[derive(Debug)]
 pub struct Session {
-    /// 全部待解决文件
+    /// All files awaiting resolution
     pub files: Vec<FileEntry>,
-    /// 当前文件下标
+    /// Current file index
     pub current: usize,
-    /// 各文件是否已写盘
+    /// Whether each file has been written
     pub written: Vec<bool>,
-    /// 状态条展示的操作名(如 "merge" / "rebase" / 文件名)
+    /// Operation label for the status bar, such as "merge", "rebase", or a filename
     pub op_label: String,
-    /// 是否折叠长稳定区(z 切换)
+    /// Whether long stable regions are folded (toggled with z)
     pub folded: bool,
 }
 
 impl Session {
-    /// 构建会话,光标落在第一个文件。
+    /// Create a session with the cursor on the first file.
     pub fn new(files: Vec<FileEntry>, op_label: String) -> Self {
         let written = files.iter().map(|_| false).collect();
         Self {
@@ -419,17 +419,17 @@ impl Session {
         }
     }
 
-    /// 当前文件。
+    /// Current file.
     pub fn current_file(&self) -> &FileEntry {
         &self.files[self.current]
     }
 
-    /// 当前文件(可变)。
+    /// Mutable access to the current file.
     pub fn current_file_mut(&mut self) -> &mut FileEntry {
         &mut self.files[self.current]
     }
 
-    /// 标记当前文件已写盘,并把光标移到下一个未写盘文件(若有)。
+    /// Mark the current file written and select an unwritten file if any remain.
     pub fn mark_written(&mut self) {
         self.written[self.current] = true;
         if let Some(idx) = (0..self.files.len()).find(|&i| !self.written[i]) {
@@ -437,12 +437,12 @@ impl Session {
         }
     }
 
-    /// 是否所有文件都已写盘。
+    /// Whether all files have been written.
     pub fn all_written(&self) -> bool {
         self.written.iter().all(|&w| w)
     }
 
-    /// 切换到下一个文件(环绕)。
+    /// Switch to the next file, wrapping at the end.
     pub fn next_file(&mut self) {
         if !self.files.is_empty() {
             self.current = (self.current + 1) % self.files.len();
@@ -454,7 +454,7 @@ impl Session {
 mod tests {
     use super::*;
 
-    /// 构造一个含 [Stable, Conflict, Stable, Ours] 的会话文件
+    /// Build a session file with [Stable, Conflict, Stable, Ours] chunks.
     fn sample() -> FileMerge {
         FileMerge::from_three_way(
             "demo.txt".to_owned(),
@@ -477,7 +477,7 @@ mod tests {
                 ChunkKind::Ours
             ]
         );
-        // 光标初始落在第一个改动块
+        // The cursor starts on the first changed chunk.
         assert_eq!(merge.cursor, 1);
     }
 
@@ -485,7 +485,7 @@ mod tests {
     fn apply_ours_resolves_conflict_side() {
         let mut merge = sample();
         merge.apply(Side::Ours);
-        assert!(!merge.chunk_resolved(1)); // theirs 侧仍待处理
+        assert!(!merge.chunk_resolved(1)); // Theirs is still pending.
         merge.ignore(Side::Theirs);
         assert!(merge.chunk_resolved(1));
         assert_eq!(merge.current_content(1), vec!["X"]);
@@ -540,7 +540,7 @@ mod tests {
         merge.set_override(vec!["merged".to_owned()]);
         assert!(merge.chunk_resolved(1));
         assert_eq!(merge.current_content(1), vec!["merged"]);
-        // 覆写后取用不再生效
+        // Taking a side has no effect after an override.
         merge.apply(Side::Ours);
         assert_eq!(merge.current_content(1), vec!["merged"]);
     }
@@ -548,7 +548,7 @@ mod tests {
     #[test]
     fn apply_on_ineffective_side_is_noop() {
         let mut merge = sample();
-        merge.cursor = 3; // Ours 块
+        merge.cursor = 3; // Ours chunk
         merge.apply(Side::Theirs);
         assert!(!merge.chunk_resolved(3));
         merge.apply(Side::Ours);
@@ -584,14 +584,14 @@ mod tests {
             "a\nX\nc\nY\ne\n",
             "a\nP\nc\nQ\ne\n",
         );
-        // 两个冲突:块 1 与块 3
+        // Two conflicts: chunks 1 and 3.
         assert_eq!(merge.pending_conflicts(), 2);
         assert_eq!(merge.cursor, 1);
         merge.next_conflict();
         assert_eq!(merge.cursor, 3);
         merge.next_conflict();
-        assert_eq!(merge.cursor, 1); // 环绕
-        // 解决块 1 后,导航只在剩余冲突上
+        assert_eq!(merge.cursor, 1); // Wrap around.
+        // After resolving chunk 1, navigate only among remaining conflicts.
         merge.apply(Side::Ours);
         merge.ignore(Side::Theirs);
         merge.next_conflict();
@@ -626,7 +626,7 @@ mod tests {
         assert!(!session.all_written());
         session.mark_written();
         assert_eq!(session.current, 1);
-        // 二选一条目选边后可写
+        // A whole-file pick is ready to write once a side is chosen.
         if let FileEntry::Pick { choice, .. } = session.current_file_mut() {
             *choice = Some(Side::Theirs);
         }

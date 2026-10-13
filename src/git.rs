@@ -32,25 +32,25 @@ pub enum GitError {
     Io(#[from] std::io::Error),
 }
 
-/// 仓库状态
+/// Repository operation state.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum RepoState {
-    /// 无进行中的合并操作
+    /// No merge operation in progress
     Clean,
-    /// merge 进行中(存在 MERGE_HEAD)
+    /// Merge in progress (MERGE_HEAD exists)
     Merging,
-    /// rebase 进行中(存在 rebase-merge,或不带 applying 标记的 rebase-apply)
+    /// Rebase in progress (rebase-merge, or rebase-apply without an applying marker)
     Rebasing,
-    /// cherry-pick 进行中(存在 CHERRY_PICK_HEAD)
+    /// Cherry-pick in progress (CHERRY_PICK_HEAD exists)
     CherryPicking,
-    /// revert 进行中(存在 REVERT_HEAD)
+    /// Revert in progress (REVERT_HEAD exists)
     Reverting,
-    /// git am 打补丁进行中(存在 rebase-apply/applying)
+    /// git am patch application in progress (rebase-apply/applying exists)
     Am,
 }
 
 impl RepoState {
-    /// 对应的 git 子命令名(用于 `--continue/--abort` 与提示信息)。
+    /// Corresponding Git subcommand for `--continue/--abort` and messages.
     pub fn op_name(self) -> &'static str {
         match self {
             RepoState::Clean => "clean",
@@ -63,50 +63,50 @@ impl RepoState {
     }
 }
 
-/// 符号链接在 index 中的 mode。
+/// Index mode for symbolic links.
 const MODE_SYMLINK: u32 = 0o120000;
-/// 子模块(gitlink)在 index 中的 mode。
+/// Index mode for submodules (gitlinks).
 const MODE_GITLINK: u32 = 0o160000;
 
-/// 冲突文件某个 stage 在 index 中的条目。
+/// Index entry for one stage of a conflicted file.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Stage {
-    /// 文件 mode(如 0o100644 普通文件、0o120000 符号链接、0o160000 子模块)
+    /// File mode (0o100644 regular file, 0o120000 symlink, 0o160000 submodule)
     pub mode: u32,
-    /// 对象 id:普通文件与符号链接为 blob,子模块为其提交
+    /// Object ID: blob for regular files and symlinks, commit for submodules
     pub oid: String,
 }
 
-/// 一个处于冲突状态的文件及其在 index 中的 stage 分布。
+/// A conflicted file and its index stages.
 ///
-/// 各 stage 记录 mode 与 oid(缺失该 stage 时为 None),
-/// 供 [`Git::read_blobs`] 单进程批量读取内容。
+/// Each stage stores a mode and OID, or None when absent, allowing
+/// [`Git::read_blobs`] to read content in a single process.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct ConflictedFile {
-    /// 相对仓库根目录的路径
+    /// Path relative to the repository root
     pub path: String,
-    /// stage 1(base);add/add 冲突时缺失
+    /// Stage 1 (base); absent for add/add conflicts
     pub base: Option<Stage>,
-    /// stage 2(ours);本方删除了该文件时缺失
+    /// Stage 2 (ours); absent if our side deleted the file
     pub ours: Option<Stage>,
-    /// stage 3(theirs);对方删除了该文件时缺失
+    /// Stage 3 (theirs); absent if their side deleted the file
     pub theirs: Option<Stage>,
 }
 
 impl ConflictedFile {
-    /// 是否涉及符号链接(任一 stage 为链接):链接目标不能按文本合并,
-    /// 也不能经文件系统写入(会写穿到链接指向的文件),只能整条取用一侧。
+    /// Whether any stage is a symlink. Link targets require a whole-side pick:
+    /// text merging or filesystem writes could modify the linked file.
     pub fn is_symlink(&self) -> bool {
         self.has_mode(MODE_SYMLINK)
     }
 
-    /// 是否涉及子模块(任一 stage 为 gitlink):其提交在子模块仓库而非本仓库
-    /// 的对象库中,无法读取内容,只能整条取用一侧记录的提交。
+    /// Whether any stage is a gitlink. Its commit belongs to the submodule's
+    /// object database, so resolution picks one side's recorded commit.
     pub fn is_submodule(&self) -> bool {
         self.has_mode(MODE_GITLINK)
     }
 
-    /// 是否有任一 stage 为指定 mode。
+    /// Whether any stage has the given mode.
     fn has_mode(&self, mode: u32) -> bool {
         [&self.base, &self.ours, &self.theirs]
             .into_iter()
@@ -115,39 +115,39 @@ impl ConflictedFile {
     }
 }
 
-/// 仓库体征:主菜单 RPG 状态面板展示的数据,打开菜单时查询一次。
+/// Repository stats queried when opening the menu for its RPG status panel.
 #[derive(Debug, Clone)]
 pub struct RepoVitals {
-    /// 当前分支名(detached HEAD 时为 "HEAD")
+    /// Current branch name ("HEAD" when detached)
     pub branch: String,
-    /// 工作区 + 暂存区改动条目数
+    /// Number of changed entries in the worktree and index
     pub changes: usize,
-    /// stash 条目数
+    /// Number of stash entries
     pub stashes: usize,
-    /// 领先上游的提交数;未设置上游分支时为 None
+    /// Commits ahead of upstream; None when no upstream is configured
     pub ahead: Option<usize>,
-    /// HEAD 可达的提交总数(空仓库为 0)
+    /// Total commits reachable from HEAD (0 for an empty repository)
     pub level: usize,
 }
 
-/// 可切换的分支清单(switch 选择器用,按本地 / 远程分组)。
+/// Switchable branches, grouped into local and remote lists for the picker.
 #[derive(Debug, Default)]
 pub struct SwitchBranches {
-    /// 本地分支(不含当前分支)
+    /// Local branches excluding the current branch
     pub locals: Vec<String>,
-    /// 远程跟踪分支(不含 HEAD 符号引用与已有同名本地分支的项)
+    /// Remote tracking branches excluding symbolic HEAD refs and existing local counterparts
     pub remotes: Vec<String>,
 }
 
-/// git 调用上下文:锚定仓库根目录,verbose 时回显执行的命令。
+/// Git command context, anchored at the repository root and echoing commands when verbose.
 pub struct Git {
-    /// 仓库根目录;所有命令经 `-C` 锚定,路径统一为根相对
+    /// Repository root; all commands use `-C` and paths are root-relative
     top: PathBuf,
-    /// 是否回显执行的 git 命令(-v)
+    /// Whether to echo executed Git commands (-v)
     verbose: bool,
 }
 
-/// 将进程启动错误归一化为 GitError。
+/// Convert process startup errors into GitError.
 fn spawn_err(e: std::io::Error) -> GitError {
     if e.kind() == std::io::ErrorKind::NotFound {
         GitError::NotFound
@@ -156,11 +156,11 @@ fn spawn_err(e: std::io::Error) -> GitError {
     }
 }
 
-/// 需要从子进程环境中清除的 git 变量。
+/// Git variables to remove from child-process environments.
 ///
-/// 当本工具从 git 钩子里被间接调起时(如 pre-commit 里跑测试),
-/// 外层 git 会注入这些指向宿主仓库的路径;嵌套 git 调用若继承它们,
-/// 会被劫持到错误的仓库,必须清掉。
+/// Git hooks, including pre-commit test runs, inject paths pointing to the host
+/// repository. Remove these variables so nested Git commands cannot be redirected
+/// to that repository.
 const SCRUBBED_GIT_ENV: [&str; 4] = [
     "GIT_DIR",
     "GIT_WORK_TREE",
@@ -168,7 +168,7 @@ const SCRUBBED_GIT_ENV: [&str; 4] = [
     "GIT_OBJECT_DIRECTORY",
 ];
 
-/// 构造锚定到指定目录的基础 git 命令:清理宿主 git 环境 + 禁用交互编辑器。
+/// Build a Git command at the given directory, scrubbing host paths and disabling the editor.
 fn base_git(dir: &Path) -> Command {
     let mut cmd = Command::new("git");
     cmd.arg("-C").arg(dir).env("GIT_EDITOR", "true");
@@ -179,7 +179,7 @@ fn base_git(dir: &Path) -> Command {
 }
 
 impl Git {
-    /// 从指定目录探测 git 仓库根并构造上下文。
+    /// Discover the repository root from a directory and build its command context.
     pub fn discover(dir: &Path, verbose: bool) -> Result<Self, GitError> {
         let out = base_git(dir)
             .args(["rev-parse", "--show-toplevel"])
@@ -195,12 +195,12 @@ impl Git {
         })
     }
 
-    /// 仓库根目录。
+    /// Repository root directory.
     pub fn top(&self) -> &Path {
         &self.top
     }
 
-    /// 执行 git 命令并捕获输出(不检查退出码,交给调用方判断)。
+    /// Run Git with captured output; the caller checks the exit code.
     pub fn run(&self, args: &[&str]) -> Result<Output, GitError> {
         if self.verbose {
             eprintln!("[git] git {}", args.join(" "));
@@ -208,7 +208,7 @@ impl Git {
         base_git(&self.top).args(args).output().map_err(spawn_err)
     }
 
-    /// 执行 git 命令,非零退出码视为错误。
+    /// Run Git, treating a nonzero exit code as an error.
     pub fn run_ok(&self, args: &[&str]) -> Result<Output, GitError> {
         let out = self.run(args)?;
         if !out.status.success() {
@@ -220,8 +220,8 @@ impl Git {
         Ok(out)
     }
 
-    /// 以透传模式执行 git:输出直接接到用户终端,
-    /// 用于发起 merge / rebase / pull(保留 git 自身的进度显示)。
+    /// Run Git with output inherited by the user's terminal, preserving progress
+    /// display when launching merge / rebase / pull.
     pub fn run_inherit(&self, args: &[&str]) -> Result<ExitStatus, GitError> {
         if self.verbose {
             eprintln!("[git] git {}", args.join(" "));
@@ -229,19 +229,19 @@ impl Git {
         base_git(&self.top).args(args).status().map_err(spawn_err)
     }
 
-    /// 探测仓库当前的合并状态。
+    /// Detect the repository's current operation state.
     pub fn state(&self) -> Result<RepoState, GitError> {
         let out = self.run_ok(&["rev-parse", "--git-dir"])?;
         let raw = String::from_utf8_lossy(&out.stdout).trim().to_owned();
-        // --git-dir 可能返回相对路径(相对仓库根)
+        // --git-dir may return a path relative to the repository root.
         let git_dir = {
             let p = PathBuf::from(&raw);
             if p.is_absolute() { p } else { self.top.join(p) }
         };
-        // rebase 必须先于 cherry-pick 判定:交互式 rebase 内部逐个重放提交,
-        // 冲突时也会留下 CHERRY_PICK_HEAD,但收尾命令是 rebase --continue
+        // Detect rebase before cherry-pick: interactive rebase replays commits and may
+        // leave CHERRY_PICK_HEAD on conflict, but must finish with rebase --continue.
         if git_dir.join("rebase-apply").exists() {
-            // rebase-apply/applying 是 git am 的标记(git 自身也以此区分两者)
+            // Git itself uses rebase-apply/applying to distinguish am from rebase.
             if git_dir.join("rebase-apply/applying").exists() {
                 Ok(RepoState::Am)
             } else {
@@ -260,7 +260,7 @@ impl Git {
         }
     }
 
-    /// 列出所有处于冲突状态的文件。
+    /// List all conflicted files.
     pub fn conflicted_files(&self) -> Result<Vec<ConflictedFile>, GitError> {
         let out = self.run_ok(&["ls-files", "-u", "-z"])?;
         Ok(parse_ls_files_unmerged(&String::from_utf8_lossy(
@@ -268,17 +268,17 @@ impl Git {
         )))
     }
 
-    /// 读取冲突文件某个 stage 的完整内容(1=base,2=ours,3=theirs)。
+    /// Read a conflicted file's complete stage content (1=base, 2=ours, 3=theirs).
     pub fn read_stage(&self, path: &str, stage: u8) -> Result<Vec<u8>, GitError> {
         let spec = format!(":{stage}:{path}");
         Ok(self.run_ok(&["show", &spec])?.stdout)
     }
 
-    /// 用单个 `git cat-file --batch` 进程批量读取 blob,按请求顺序返回。
+    /// Read blobs through one `git cat-file --batch` process, returning them in request order.
     ///
-    /// 逐文件 `git show` 每个 stage 都要 spawn 一次进程(实测 ~12-16ms),
-    /// 冲突文件多时进入 TUI 前的等待明显;这里改为请求-应答式复用一个
-    /// 子进程,进程开销从 O(3N) 降为 O(1)。
+    /// A separate `git show` per stage costs about 12-16 ms per process, delaying
+    /// TUI startup for many conflicts. Reusing one request-response process reduces
+    /// process startup overhead from O(3N) to O(1).
     pub fn read_blobs(&self, oids: &[&str]) -> Result<Vec<Vec<u8>>, GitError> {
         use std::io::{BufRead, BufReader, Read, Write};
 
@@ -295,7 +295,7 @@ impl Git {
             .stderr(std::process::Stdio::null())
             .spawn()
             .map_err(spawn_err)?;
-        // 逐条请求-应答,避免双向管道同时写满导致的死锁
+        // Alternate requests and responses to avoid deadlock from filling both pipes.
         let mut stdin = child.stdin.take().ok_or(GitError::NotFound)?;
         let mut stdout = BufReader::new(child.stdout.take().ok_or(GitError::NotFound)?);
         let failed = |detail: String| GitError::Failed {
@@ -307,7 +307,7 @@ impl Git {
         for oid in oids {
             stdin.write_all(format!("{oid}\n").as_bytes())?;
             stdin.flush()?;
-            // 应答头:`<oid> <type> <size>` 或 `<oid> missing`
+            // Response header: `<oid> <type> <size>` or `<oid> missing`.
             let mut header = String::new();
             stdout.read_line(&mut header)?;
             let size: usize = header
@@ -317,7 +317,7 @@ impl Git {
                 .ok_or_else(|| failed(format!("对象 {oid} 不可读: {}", header.trim())))?;
             let mut content = vec![0u8; size];
             stdout.read_exact(&mut content)?;
-            // 每个对象后跟一个换行分隔符
+            // Each object is followed by a newline separator.
             stdout.read_exact(&mut [0u8; 1])?;
             blobs.push(content);
         }
@@ -326,8 +326,8 @@ impl Git {
         Ok(blobs)
     }
 
-    /// 列出可作为 merge / rebase 目标的分支:本地 + 远程跟踪,
-    /// 排除当前分支与 HEAD 符号引用。
+    /// List local and remote tracking branches available as merge / rebase targets,
+    /// excluding the current branch and symbolic HEAD refs.
     pub fn list_branches(&self) -> Result<Vec<String>, GitError> {
         let current = {
             let out = self.run_ok(&["branch", "--show-current"])?;
@@ -344,11 +344,11 @@ impl Git {
         Ok(branches)
     }
 
-    /// 列出某前缀下的分支引用(短名),符号引用(如 origin/HEAD)被剔除。
+    /// List short branch refs under a prefix, excluding symbolic refs such as origin/HEAD.
     ///
-    /// 不用 `branch --format=%(refname:short)`:它对 `origin/HEAD` 的缩写
-    /// 行为随 git 版本变化(旧版输出 `origin/HEAD`,新版输出裸 `origin`),
-    /// 按名称启发过滤不可靠;`%(symref)` 字段可精确识别符号引用。
+    /// Avoid `branch --format=%(refname:short)`: Git versions abbreviate origin/HEAD
+    /// differently (origin/HEAD in older versions, origin in newer ones). Name-based
+    /// filtering is unreliable; `%(symref)` identifies symbolic refs precisely.
     fn list_refs(&self, prefix: &str) -> Result<Vec<String>, GitError> {
         let out = self.run_ok(&[
             "for-each-ref",
@@ -364,9 +364,9 @@ impl Git {
             .collect())
     }
 
-    /// 列出可切换的分支:本地分支排除当前;远程分支排除 HEAD 符号引用,
-    /// 以及已有同名本地分支的项(如本地 `foo` 存在时隐藏 `origin/foo`,
-    /// 本地条目已覆盖该目标,避免选择器里重复出现)。
+    /// List switchable branches: exclude the current local branch, symbolic remote HEAD,
+    /// and remote entries with local counterparts (hide origin/foo when foo exists)
+    /// to avoid duplicate targets in the picker.
     pub fn list_switch_branches(&self) -> Result<SwitchBranches, GitError> {
         let current = {
             let out = self.run_ok(&["branch", "--show-current"])?;
@@ -377,7 +377,7 @@ impl Git {
             .into_iter()
             .filter(|name| *name != current)
             .collect();
-        // 远程分支去掉首段远程名后与本地重名的隐藏(origin/feat/x → feat/x)
+        // Hide remote branches whose name after the remote prefix exists locally (origin/feat/x -> feat/x).
         let remotes = self
             .list_refs("refs/remotes")?
             .into_iter()
@@ -389,7 +389,7 @@ impl Git {
         Ok(SwitchBranches { locals, remotes })
     }
 
-    /// 完整引用是否存在(如 `refs/heads/foo` / `refs/remotes/origin/foo`)。
+    /// Whether a full ref exists, such as `refs/heads/foo` / `refs/remotes/origin/foo`.
     pub fn ref_exists(&self, full_ref: &str) -> Result<bool, GitError> {
         Ok(self
             .run(&["show-ref", "--verify", "--quiet", full_ref])?
@@ -397,11 +397,11 @@ impl Git {
             .success())
     }
 
-    /// 最近提交列表(`--oneline` 行,首列为短 hash),提交选择器用。
+    /// Recent commits as `--oneline` entries with a short hash first, for the commit picker.
     ///
-    /// `others_only` 为 true 时只列不在当前分支上的提交(cherry-pick 候选),
-    /// 否则列当前分支的最近提交(revert 候选)。
-    /// 空仓库等无提交可列的场景返回空列表而非报错。
+    /// With `others_only`, list commits outside the current branch for cherry-pick;
+    /// otherwise list recent commits on this branch for revert.
+    /// Return an empty list when no commits exist, such as in an empty repository.
     pub fn recent_commits(&self, others_only: bool, limit: usize) -> Result<Vec<String>, GitError> {
         let n = format!("-n{limit}");
         let mut args = vec!["log", "--oneline", &n];
@@ -418,14 +418,14 @@ impl Git {
             .collect())
     }
 
-    /// 探测仓库体征:分支、改动数、贮藏数、待推送数与提交总数。
+    /// Query repository stats: branch, changes, stashes, commits ahead, and total commits.
     ///
-    /// 五个查询彼此独立,而每次 git 进程 spawn 约 12-16ms,串行累计的
-    /// 延迟在打开菜单时可感知,因此用作用域线程并行执行,总耗时约等于
-    /// 最慢的一次;`ahead` / `level` 在无上游 / 空仓库时查询会非零退出,
-    /// 分别归一化为 None / 0 而非报错。
+    /// Five independent queries each cost about 12-16 ms to spawn, so scoped threads
+    /// run them concurrently to keep menu startup near the slowest query's duration.
+    /// Missing upstream and empty repositories yield nonzero exits for `ahead` and
+    /// `level`, normalized to None and 0 respectively.
     pub fn vitals(&self) -> Result<RepoVitals, GitError> {
-        // 汇合子线程;查询闭包只返回 Result 不会 panic,此分支仅为完备
+        // Join workers; query closures return Result, so panic handling is defensive.
         fn joined<T>(handle: std::thread::ScopedJoinHandle<'_, T>) -> Result<T, GitError> {
             handle.join().map_err(|_| GitError::Failed {
                 cmd: "vitals".to_owned(),
@@ -471,11 +471,11 @@ impl Git {
         })
     }
 
-    /// 将解决后的内容写入工作区文件并 `git add`。
+    /// Write resolved content to the worktree and run `git add`.
     pub fn stage_resolved(&self, path: &str, content: &[u8]) -> Result<(), GitError> {
         let full = self.top.join(path);
-        // 工作区路径是符号链接时先删除链接本身:fs::write 会跟随链接,
-        // 把内容写进链接指向的文件(可能在仓库之外)
+        // Remove an existing symlink first: fs::write follows it and could overwrite
+        // its target, which may be outside the repository.
         if std::fs::symlink_metadata(&full).is_ok_and(|meta| meta.file_type().is_symlink()) {
             std::fs::remove_file(&full)?;
         }
@@ -483,11 +483,11 @@ impl Git {
         self.add_path(path)
     }
 
-    /// 整条取用冲突文件的某一侧(`stage` 为 2 本地 / 3 远端),用于不能按内容
-    /// 合并、也不能经文件系统写入的冲突(符号链接 / 子模块),做法与 git mergetool 一致:
-    /// - 子模块:只改 index(`update-index`),不动子模块工作区(其中可能有未推送的提交)
-    /// - 其余:该侧存在时 `checkout-index -f` 检出该侧再 `git add`(git 先删除旧路径
-    ///   再创建,不会写穿链接,并遵循 core.symlinks);该侧已删除时 `git rm`
+    /// Take a whole side of a conflicted file (`stage` 2 local / 3 remote), following
+    /// git mergetool semantics for objects that cannot be merged or written as text:
+    /// - Submodules: update only the index, preserving the checkout and any unpushed commits.
+    /// - Other files: use `checkout-index -f` and `git add`, or `git rm` for a deleted side.
+    ///   Git replaces the old path without following symlinks and respects core.symlinks.
     pub fn take_side(&self, file: &ConflictedFile, stage: u8) -> Result<(), GitError> {
         let chosen = match stage {
             2 => &file.ours,
@@ -521,18 +521,18 @@ impl Git {
         self.add_path(path)
     }
 
-    /// 按字面路径 `git add`:文件名可能含 `*` `?` `[` 等 glob 字符,按 pathspec
-    /// 解析会把匹配到的其他文件(含未跟踪文件)一并暂存进合并提交。
+    /// Run `git add` with a literal path: glob characters such as `*`, `?`, and `[` in
+    /// filenames must not stage unrelated matching files into the merge commit.
     fn add_path(&self, path: &str) -> Result<(), GitError> {
         self.run_ok(&["--literal-pathspecs", "add", "--", path])?;
         Ok(())
     }
 
-    /// 继续当前 merge / rebase(冲突全部解决后调用)。
+    /// Continue the current merge / rebase after resolving all conflicts.
     ///
-    /// 以透传模式执行:git 与钩子的输出(含颜色)实时流向用户终端。
-    /// 返回退出码而非直接判错:rebase --continue 在下一个 commit
-    /// 冲突时也会非零退出,是否算失败由调用方结合冲突探测决定。
+    /// Stream Git and hook output, including colors, directly to the terminal.
+    /// Return the exit code because rebase --continue can exit nonzero when the next
+    /// commit conflicts; the caller probes conflicts to decide whether it failed.
     pub fn continue_op(&self, state: RepoState) -> Result<ExitStatus, GitError> {
         let op = match state {
             RepoState::Clean => {
@@ -546,7 +546,7 @@ impl Git {
         self.run_inherit(&["-c", "core.editor=true", op, "--continue"])
     }
 
-    /// 中止当前 merge / rebase。
+    /// Abort the current merge / rebase.
     pub fn abort_op(&self, state: RepoState) -> Result<(), GitError> {
         let op = match state {
             RepoState::Clean => {
@@ -561,10 +561,10 @@ impl Git {
     }
 }
 
-/// 解析 `git ls-files -u -z` 的输出。
+/// Parse `git ls-files -u -z` output.
 ///
-/// 每个条目格式为 `<mode> <oid> <stage>\t<path>`,以 NUL 分隔;
-/// 同一路径会按 stage 出现 1~3 次,归组为单个 [`ConflictedFile`]。
+/// NUL-separated entries have the form `<mode> <oid> <stage>\t<path>`.
+/// Group the one to three stage entries for a path into one [`ConflictedFile`].
 fn parse_ls_files_unmerged(text: &str) -> Vec<ConflictedFile> {
     let mut files: Vec<ConflictedFile> = Vec::new();
     for entry in text.split('\0').filter(|e| !e.is_empty()) {
@@ -609,7 +609,7 @@ fn parse_ls_files_unmerged(text: &str) -> Vec<ConflictedFile> {
 mod tests {
     use super::*;
 
-    /// 普通文件的 stage 条目
+    /// Stage entry for a regular file.
     fn regular(oid: &str) -> Option<Stage> {
         Some(Stage {
             mode: 0o100644,
@@ -632,13 +632,13 @@ mod tests {
             }
         );
         assert!(!files[0].is_symlink());
-        // add/add 冲突:没有 stage 1
+        // Add/add conflict: no stage 1.
         assert!(files[1].base.is_none());
         assert!(files[1].ours.is_some() && files[1].theirs.is_some());
     }
 
-    /// mode 按八进制解析;任一 stage 为符号链接即视为链接冲突
-    /// (merge-ort 会把链接 ↔ 文件的类型变更拆成两个路径,链接一侧可能只剩单个 stage)
+    /// Parse modes as octal; a symlink in any stage identifies a link conflict.
+    /// merge-ort splits symlink/file type changes into two paths, possibly leaving one link stage.
     #[test]
     fn detects_symlink_stages() {
         let text = "120000 aaaa 1\tlink\x00120000 bbbb 2\tlink\x00120000 cccc 3\tlink\x00120000 dddd 2\tx\x00";
@@ -646,11 +646,11 @@ mod tests {
         assert_eq!(files[0].ours.as_ref().map(|s| s.mode), Some(MODE_SYMLINK));
         assert!(files[0].is_symlink());
         assert!(files[1].is_symlink() && files[1].theirs.is_none());
-        // mode 非法的条目被跳过
+        // Skip entries with invalid modes.
         assert!(parse_ls_files_unmerged("12x000 aaaa 2\tbad\x00").is_empty());
     }
 
-    /// 任一 stage 为 gitlink 即视为子模块冲突
+    /// A gitlink in any stage identifies a submodule conflict.
     #[test]
     fn detects_submodule_stages() {
         let text = "160000 aaaa 1\tsub\x00160000 bbbb 2\tsub\x00160000 cccc 3\tsub\x00";
@@ -666,7 +666,7 @@ mod tests {
 
     #[test]
     fn tolerates_tab_in_path() {
-        // -z 模式下路径不转义,首个 \t 之后整体视为路径
+        // With -z, paths are unescaped; everything after the first tab is the path.
         let text = "100644 aaaa 2\ta\tb.txt\0";
         let files = parse_ls_files_unmerged(text);
         assert_eq!(files[0].path, "a\tb.txt");

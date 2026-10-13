@@ -1,13 +1,14 @@
-//! 高亮计算与缓存:块内词级差异(delta 式 word-level emphasis)+ syntect 语法高亮。
+//! Highlight computation and caching: delta-style word emphasis and syntect syntax highlighting.
 //!
-//! 词级差异分两阶段:先在块内做行级配对(Replace 区间的新旧行按下标一一配对,
-//! 与 delta 同款策略),再对每对行做行内词级 diff 得到变化的字节区间。
-//! 三方模式下各侧与 base 对比;`file` 模式解析出的冲突块 base 恒为空,
-//! 此时退化为 ours ↔ theirs 互比,两栏各自高亮「与对侧不同的词」。
+//! Word differences are computed in two stages: pair old and new lines by index
+//! within Replace ranges, as delta does, then diff words to identify changed byte ranges.
+//! Three-way mode compares each side with base; parsed `file` conflicts without a base
+//! compare ours and theirs directly, highlighting words that differ from the other side.
 //!
-//! 语法高亮按文件计算一次而非逐帧:ours / theirs 栏内容不可变,构建后终身有效;
-//! result 栏随取用变化,以 `revision` 判定失效并按块增量重算(块边界缓存
-//! syntect 解析状态,见 [`ResultSyntax`])。只取 syntect 的前景色,背景让位给色带。
+//! Syntax highlighting is computed per file, not per frame. Immutable ours / theirs
+//! panes remain cached; result changes invalidate by `revision` and update incrementally
+//! using cached parser states at chunk boundaries (see [`ResultSyntax`]). Only syntect
+//! foreground colors are used, leaving backgrounds to change bands.
 
 use std::collections::HashMap;
 use std::ops::Range;
@@ -25,22 +26,22 @@ use syntect::parsing::{ParseState, ScopeStack, SyntaxReference, SyntaxSet};
 use crate::app::{ChunkState, FileMerge};
 use crate::merge::{ChunkKind, MergeChunk};
 
-/// 词级强调的降级阈值:任一侧行数超限的块直接跳过
+/// Skip word emphasis for chunks whose line count on either side exceeds this limit.
 const EMPH_MAX_LINES: usize = 400;
-/// 单行字节数超限时跳过该行的词级 diff
+/// Skip word diff for lines exceeding this byte limit.
 const EMPH_MAX_LINE_BYTES: usize = 2000;
-/// 词级强调的占比上限(%):强调字节超过行长的该比例时退化为整行色带
+/// Maximum emphasized byte percentage before falling back to a plain whole-line band.
 const EMPH_MAX_RATIO: usize = 70;
-/// 语法高亮的降级阈值:三栏总行数超限的文件禁用 syntect(fancy-regex 较慢)
+/// Disable syntect when the total line count across panes exceeds this limit (fancy-regex is slow).
 const SYNTAX_MAX_LINES: usize = 10_000;
 
-/// 进程级共享的语法定义集(dump 反序列化仅一次)。
+/// Process-wide syntax definitions, deserialized from the dump only once.
 fn syntax_set() -> &'static SyntaxSet {
     static SET: OnceLock<SyntaxSet> = OnceLock::new();
     SET.get_or_init(SyntaxSet::load_defaults_newlines)
 }
 
-/// 进程级共享的 syntect 主题(深 / 浅两套,各自惰性构建一次)。
+/// Process-wide syntect themes, lazily built once for each dark / light variant.
 fn syntect_theme(light: bool) -> &'static SyntectTheme {
     static DARK: OnceLock<SyntectTheme> = OnceLock::new();
     static LIGHT: OnceLock<SyntectTheme> = OnceLock::new();
@@ -51,11 +52,11 @@ fn syntect_theme(light: bool) -> &'static SyntectTheme {
     }
 }
 
-/// RGB 三元组(语法配色表用)。
+/// RGB tuple used by the syntax palette.
 type Rgb = (u8, u8, u8);
 
-/// scope 选择器 → (Maple Dark 前景色, Maple Light 前景色),
-/// 取自 maple-{dark,light}-color-theme.json 的 tokenColors。
+/// Scope selectors mapped to (Maple Dark foreground, Maple Light foreground),
+/// from tokenColors in maple-{dark,light}-color-theme.json.
 const TOKEN_COLORS: &[(&str, Rgb, Rgb)] = &[
     (
         "comment, punctuation.definition.comment",
@@ -144,25 +145,25 @@ const TOKEN_COLORS: &[(&str, Rgb, Rgb)] = &[
     ),
 ];
 
-/// Maple 主题(https://github.com/subframe7536/vscode-theme-maple)。
+/// Maple theme (https://github.com/subframe7536/vscode-theme-maple).
 ///
-/// syntect 内置主题集中没有该主题,这里把其 tokenColors 的核心 scope
-/// 手工移植为代码内构建的 syntect Theme:只移植前景色(背景让位给色带),
-/// 不移植粗斜体。默认前景与 VSCode 版一致,渲染层会将其交回终端默认色。
+/// Maple is not bundled with syntect, so its core tokenColors scopes are ported
+/// into a Theme built in code. Only foreground colors are used, without bold or italic,
+/// leaving backgrounds to bands. The VSCode default foreground becomes terminal default.
 fn maple(light: bool) -> SyntectTheme {
     let rgb = |(r, g, b): Rgb| SyntectColor { r, g, b, a: 0xff };
     let mut theme = SyntectTheme {
         name: Some(if light { "Maple Light" } else { "Maple Dark" }.to_owned()),
         ..SyntectTheme::default()
     };
-    // editor.foreground(dark #cbd5e1 / light #475569);渲染层会跳过等于默认前景的 token
+    // editor.foreground (dark #cbd5e1 / light #475569); rendering skips tokens matching this default.
     theme.settings.foreground = Some(rgb(if light {
         (0x47, 0x55, 0x69)
     } else {
         (0xcb, 0xd5, 0xe1)
     }));
     for (scopes, dark, light_color) in TOKEN_COLORS {
-        // scope 常量在编译期固定,解析失败直接跳过该条而非 panic
+        // Scope constants are fixed at compile time; skip invalid entries instead of panicking.
         let Ok(scope) = scopes.parse::<ScopeSelectors>() else {
             continue;
         };
@@ -178,47 +179,47 @@ fn maple(light: bool) -> SyntectTheme {
     theme
 }
 
-/// 一行中发生变化的字节区间(升序、互不重叠,均落在 char 边界)。
+/// Changed byte ranges in one line, sorted, non-overlapping, and on character boundaries.
 pub(crate) type Emphasis = Vec<Range<usize>>;
 
-/// 一个块的词级强调:与 chunk.ours / chunk.theirs 的行一一对应。
+/// Word emphasis for a chunk, corresponding to each line in chunk.ours / chunk.theirs.
 #[derive(Debug, Default)]
 pub(crate) struct ChunkEmphasis {
     pub(crate) ours: Vec<Emphasis>,
     pub(crate) theirs: Vec<Emphasis>,
 }
 
-/// 一栏的语法高亮:下标 = 该栏文档行号 - 1,每行为 (前景色, 字节区间) 列表。
+/// Pane syntax highlighting indexed by line number - 1, with (foreground, byte range) spans per line.
 #[derive(Debug, Default)]
 pub(crate) struct PaneSyntax {
     pub(crate) lines: Vec<Vec<(Color, Range<usize>)>>,
 }
 
-/// 一个文件的全部高亮信息。
+/// All highlighting information for one file.
 #[derive(Debug)]
 pub(crate) struct FileHighlight {
-    /// 各块的词级强调(与 chunks 一一对应,构建一次终身有效)
+    /// Word emphasis per chunk, built once and valid for the file's lifetime
     pub(crate) emphasis: Vec<ChunkEmphasis>,
-    /// 本地栏语法高亮(内容不可变,构建一次)
+    /// Local pane syntax highlighting, built once for immutable content
     pub(crate) ours: Option<PaneSyntax>,
-    /// 远端栏语法高亮(内容不可变,构建一次)
+    /// Remote pane syntax highlighting, built once for immutable content
     pub(crate) theirs: Option<PaneSyntax>,
-    /// 结果栏语法高亮(随取用变化,按 revision 增量重算)
+    /// Result pane syntax highlighting, incrementally updated by revision
     pub(crate) result: Option<ResultSyntax>,
-    /// 匹配到的语法定义;None 表示该文件不做语法高亮
+    /// Matching syntax definition; None disables syntax highlighting for this file
     syntax: Option<&'static SyntaxReference>,
-    /// 是否使用浅色语法主题(result 栏重算时沿用)
+    /// Whether to use light syntax colors, retained for result updates
     light: bool,
-    /// result 栏所对应的状态修订号
+    /// State revision represented by the result pane
     result_rev: u64,
 }
 
 impl FileHighlight {
-    /// 构建文件的完整高亮信息。
+    /// Build all highlighting information for a file.
     ///
-    /// 三栏 syntect 高亮互相独立且都是纯 CPU 计算(实测 ~62µs/行),
-    /// 用作用域线程并行构建,把大文件首帧的等待压到最慢一栏;
-    /// 词级强调留在当前线程,与三栏计算重叠。
+    /// Syntax highlighting is independent per pane and CPU-bound (about 62 us/line).
+    /// Scoped threads build panes concurrently, keeping first-frame latency near
+    /// the slowest pane while word emphasis runs on the current thread.
     fn build(merge: &FileMerge, rev: u64, light: bool) -> Self {
         let syntax = find_syntax(merge);
         let (emphasis, ours, theirs, result) = std::thread::scope(|scope| {
@@ -248,7 +249,7 @@ impl FileHighlight {
                 })
             });
             let emphasis: Vec<ChunkEmphasis> = merge.chunks.iter().map(chunk_emphasis).collect();
-            // 计算闭包不会 panic;万一发生则优雅降级为无语法高亮
+            // Computation should not panic; gracefully disable syntax highlighting if it does.
             (
                 emphasis,
                 ours.join().unwrap_or_default(),
@@ -268,15 +269,15 @@ impl FileHighlight {
     }
 }
 
-/// 按文件下标缓存高亮信息。
+/// Highlight information cached by file index.
 #[derive(Debug, Default)]
 pub(crate) struct HighlightCache {
     files: HashMap<usize, FileHighlight>,
 }
 
 impl HighlightCache {
-    /// 取当前文件的高亮信息:首次访问时构建;
-    /// revision 变化(取用 / 撤销 / 编辑)时只增量重算结果栏的变化块。
+    /// Get highlighting, building it on first access. Revision changes from taking,
+    /// undoing, or editing incrementally update only changed result chunks.
     pub(crate) fn get(
         &mut self,
         file_idx: usize,
@@ -298,35 +299,35 @@ impl HighlightCache {
     }
 }
 
-/// 结果栏语法高亮:按块缓存边界解析状态与输出。
+/// Result syntax highlighting, caching parser boundary states and output per chunk.
 ///
-/// syntect 的解析状态跨行传递,无法按块独立计算;但可以在块边界快照状态:
-/// 取用 / 撤销时从第一个内容变化的块开始重算,一旦后续块的入口状态与
-/// 缓存一致即恢复命中(状态收敛),把单次按键的成本从 O(全文件) 降到
-/// O(变化块 + 收敛尾巴)。
+/// Syntect parser state flows across lines, preventing independent chunk parsing.
+/// Snapshot boundary states and recompute from the first changed chunk until a later
+/// entry state matches the cache. This convergence reduces per-key cost from
+/// O(whole file) to O(changed chunks + convergence tail).
 #[derive(Debug, Default)]
 pub(crate) struct ResultSyntax {
-    /// 与 chunks 一一对应的块级缓存
+    /// Per-chunk caches corresponding one-to-one with chunks
     chunks: Vec<ChunkSyntax>,
-    /// 最近一次 update 实际解析的行数(增量效果的观测口)
+    /// Lines actually parsed by the last update, exposing incremental work
     parsed_lines: usize,
 }
 
-/// 结果栏单个块的高亮缓存。
+/// Highlight cache for one result chunk.
 #[derive(Debug)]
 struct ChunkSyntax {
-    /// 块解决状态的指纹(内容仅由取用顺序与覆写决定)
+    /// Resolution fingerprint; content depends only on take order and overrides
     fingerprint: u64,
-    /// 进入该块时的解析 / 高亮状态(命中判定用)
+    /// Parser and highlighter entry states used for cache matching
     start: (ParseState, HighlightState),
-    /// 离开该块时的状态(命中时快进用)
+    /// Exit states used to fast-forward through a cache hit
     end: (ParseState, HighlightState),
-    /// 块内每行的着色段
+    /// Colored spans for each line in the chunk
     spans: Vec<Vec<(Color, Range<usize>)>>,
 }
 
 impl ResultSyntax {
-    /// 增量重算:逐块走一遍,指纹与入口状态都命中的块直接复用并快进状态。
+    /// Update incrementally, reusing chunks with matching fingerprints and entry states.
     fn update(&mut self, merge: &FileMerge, syntax: &SyntaxReference, light: bool) {
         let set = syntax_set();
         let theme = syntect_theme(light);
@@ -375,7 +376,7 @@ impl ResultSyntax {
         self.chunks.truncate(merge.chunks.len());
     }
 
-    /// 取某块内某行(块内偏移)的着色段。
+    /// Get colored spans by chunk index and line offset within the chunk.
     pub(crate) fn spans(&self, chunk: usize, offset: usize) -> &[(Color, Range<usize>)] {
         self.chunks
             .get(chunk)
@@ -383,15 +384,15 @@ impl ResultSyntax {
             .map_or(&[], Vec::as_slice)
     }
 
-    /// 结果栏当前缓存的总行数(测试断言用)。
+    /// Total cached result lines, used by test assertions.
     #[cfg(test)]
     fn line_count(&self) -> usize {
         self.chunks.iter().map(|c| c.spans.len()).sum()
     }
 }
 
-/// 块解决状态的指纹:结果内容仅由「取用顺序 + 覆写内容」决定,
-/// 无需拼接行内容即可判断块是否变化。
+/// Fingerprint the take order and override content that determine a chunk's result,
+/// detecting changes without concatenating its lines.
 fn state_fingerprint(state: &ChunkState) -> u64 {
     use std::hash::{Hash, Hasher};
     let mut hasher = std::collections::hash_map::DefaultHasher::new();
@@ -409,7 +410,7 @@ fn state_fingerprint(state: &ChunkState) -> u64 {
     hasher.finish()
 }
 
-/// 按扩展名匹配语法定义;超大文件(三栏总行数超限)禁用。
+/// Match syntax by extension; disable it when total pane lines exceed the limit.
 fn find_syntax(merge: &FileMerge) -> Option<&'static SyntaxReference> {
     let total: usize = merge
         .chunks
@@ -421,12 +422,12 @@ fn find_syntax(merge: &FileMerge) -> Option<&'static SyntaxReference> {
     }
     let ext = std::path::Path::new(&merge.path).extension()?.to_str()?;
     let syntax = syntax_set().find_syntax_by_extension(ext)?;
-    // Plain Text 没有任何着色规则,整栏统一主题默认色反而压暗正文,
-    // 不如不做语法高亮,让正文用终端默认前景(更亮)
+    // Plain Text has no color rules; using its theme foreground would dim the pane.
+    // Disable highlighting so text uses the brighter terminal default foreground.
     (syntax.name != "Plain Text").then_some(syntax)
 }
 
-/// 逐行高亮一栏内容;syntect 解析状态跨行传递,必须按文档顺序整栏计算。
+/// Highlight a pane in document order because syntect parser state flows across lines.
 fn highlight_pane(
     lines: &mut dyn Iterator<Item = &String>,
     syntax: &SyntaxReference,
@@ -444,11 +445,11 @@ fn highlight_pane(
     PaneSyntax { lines: out }
 }
 
-/// 用低层 API 高亮一行,推进解析 / 高亮状态,产出非默认前景的着色段。
+/// Highlight a line with the low-level API, advancing states and emitting non-default colors.
 ///
-/// newlines 版语法集要求输入行带换行符,产出区间时再剔除;
-/// 等于主题默认前景的 token(普通标识符 / 标点)不产出着色段,
-/// 交回终端默认前景,保持正文亮度;只有语义色 token(关键字 / 字符串等)上色。
+/// The newline-aware syntax set requires trailing newlines, removed from output ranges.
+/// Tokens matching the theme's default foreground use the terminal default to preserve
+/// brightness; only semantic tokens, such as keywords and strings, receive colors.
 fn line_spans(
     parse: &mut ParseState,
     hl: &mut HighlightState,
@@ -475,7 +476,7 @@ fn line_spans(
     spans
 }
 
-/// 计算一个块的词级强调;稳定块与超大块返回全空。
+/// Compute word emphasis for a chunk; stable and oversized chunks return empty ranges.
 fn chunk_emphasis(chunk: &MergeChunk) -> ChunkEmphasis {
     let mut out = ChunkEmphasis {
         ours: vec![Emphasis::new(); chunk.ours_lines().len()],
@@ -488,8 +489,8 @@ fn chunk_emphasis(chunk: &MergeChunk) -> ChunkEmphasis {
         return out;
     }
     if chunk.base.is_empty() {
-        // base 为空(file 模式的冲突块,或纯插入):冲突块改为两侧互比,
-        // 单侧纯插入无对照物,不做词级强调(色带已表意)
+        // With no base (parsed file conflicts or pure insertions), compare conflict sides directly.
+        // Single-side insertions have no reference; their band is enough without word emphasis.
         if chunk.kind == ChunkKind::Conflict {
             cross_emphasis(chunk, &mut out);
         }
@@ -510,13 +511,13 @@ fn chunk_emphasis(chunk: &MergeChunk) -> ChunkEmphasis {
     out
 }
 
-/// 一侧相对 base 的词级强调:行级配对后,对每对行做行内 diff(区间归属改动侧)。
+/// Pair lines against base, then compute inline differences on the changed side.
 fn side_emphasis(base: &[String], side: &[String], out: &mut [Emphasis]) {
     for op in capture_diff_slices(Algorithm::Myers, base, side) {
         if op.tag() != DiffTag::Replace {
             continue;
         }
-        // Replace 的新旧行按下标配对,多出的行整行无词级强调
+        // Pair Replace lines by index; extra lines receive no word emphasis.
         for (b, s) in op.old_range().zip(op.new_range()) {
             if let Some(slot) = out.get_mut(s) {
                 *slot = line_emphasis(&base[b], &side[s]);
@@ -525,7 +526,7 @@ fn side_emphasis(base: &[String], side: &[String], out: &mut [Emphasis]) {
     }
 }
 
-/// 冲突块 base 为空时的退化:ours ↔ theirs 互比,两侧各自记录差异区间。
+/// For conflicts without base, compare ours and theirs and record each side's differences.
 fn cross_emphasis(chunk: &MergeChunk, out: &mut ChunkEmphasis) {
     for op in capture_diff_slices(Algorithm::Myers, chunk.ours_lines(), chunk.theirs_lines()) {
         if op.tag() != DiffTag::Replace {
@@ -543,15 +544,15 @@ fn cross_emphasis(chunk: &MergeChunk, out: &mut ChunkEmphasis) {
     }
 }
 
-/// 行内词级 diff:返回 new 侧中与 old 不同的字节区间(相邻区间合并)。
+/// Return byte ranges in new that differ from old, merging adjacent word differences.
 ///
-/// 两个视觉优化(与 delta 语义一致):
-/// - 强调段之间仅隔纯空白时并入同一段,避免断裂的碎片感;
-/// - 强调覆盖占比超过 [`EMPH_MAX_RATIO`] 时整行退化为纯色带,
-///   几乎整行都变了时词级强调只剩噪点。
+/// Two visual refinements, matching delta:
+/// - Bridge whitespace-only gaps between emphasis ranges to avoid fragmentation.
+/// - Use only the line band when emphasis exceeds [`EMPH_MAX_RATIO`], avoiding
+///   noisy word highlighting when nearly the entire line changed.
 ///
-/// 游标只在 Equal 与 Insert 时前进(两者都是 new 侧的内容),
-/// 因此区间必然落在 char 边界上,渲染层切片安全。
+/// Advance the cursor only for Equal and Insert, which belong to new, ensuring
+/// ranges end on character boundaries and can be sliced safely during rendering.
 fn line_emphasis(old: &str, new: &str) -> Emphasis {
     if old.len() > EMPH_MAX_LINE_BYTES || new.len() > EMPH_MAX_LINE_BYTES {
         return Emphasis::new();
@@ -564,7 +565,7 @@ fn line_emphasis(old: &str, new: &str) -> Emphasis {
             ChangeTag::Equal => pos += token.len(),
             ChangeTag::Insert => {
                 let next = pos + token.len();
-                // 相邻(间隙为空)或仅隔纯空白的区间并入同一段
+                // Merge adjacent ranges or ranges separated only by whitespace.
                 match ranges.last_mut() {
                     Some(last) if new[last.end..pos].chars().all(char::is_whitespace) => {
                         last.end = next;
@@ -586,7 +587,7 @@ fn line_emphasis(old: &str, new: &str) -> Emphasis {
 mod tests {
     use super::*;
 
-    /// 手工构造块的辅助函数
+    /// Helper for manually constructing chunks.
     fn chunk(kind: ChunkKind, base: &[&str], ours: &[&str], theirs: &[&str]) -> MergeChunk {
         let v = |s: &[&str]| s.iter().map(|t| (*t).to_owned()).collect();
         MergeChunk {
@@ -601,7 +602,7 @@ mod tests {
         }
     }
 
-    /// 三方模式:各侧相对 base 的变化词被精确定位
+    /// Three-way mode precisely locates each side's changed words relative to base.
     #[test]
     fn emphasis_against_base() {
         let c = chunk(
@@ -611,12 +612,12 @@ mod tests {
             &["let b = 1;"],
         );
         let e = chunk_emphasis(&c);
-        // ours 变化 token 为 "2;"(词级粒度含相邻标点),theirs 为 "b"
+        // Ours changes "2;" (word granularity includes adjacent punctuation); theirs changes "b".
         assert_eq!(e.ours[0], vec![8..10]);
         assert_eq!(e.theirs[0], vec![4..5]);
     }
 
-    /// base 为空的冲突块:退化为 ours ↔ theirs 互比
+    /// Conflicts without base fall back to comparing ours and theirs.
     #[test]
     fn empty_base_falls_back_to_cross_compare() {
         let c = chunk(ChunkKind::Conflict, &[], &["hello world"], &["hello rust"]);
@@ -625,21 +626,21 @@ mod tests {
         assert_eq!(e.theirs[0], vec![6..10]); // "rust"
     }
 
-    /// 空白间隙桥接:相邻强调段之间只隔空格时并成一段连续强调
+    /// Bridge whitespace-only gaps into one continuous emphasis range.
     #[test]
     fn whitespace_gaps_are_bridged() {
         let e = line_emphasis("prefix stays aa bb", "prefix stays xx yy");
         assert_eq!(e, vec![13..18]);
     }
 
-    /// 强调覆盖占比超阈值的行退化为纯色带(无词级强调)
+    /// Lines exceeding the emphasis ratio use only a band, without word emphasis.
     #[test]
     fn mostly_changed_line_degrades_to_band() {
         let e = line_emphasis("old", "an entirely different line");
         assert!(e.is_empty());
     }
 
-    /// 超大块直接降级为全空强调
+    /// Oversized chunks fall back to empty emphasis.
     #[test]
     fn oversized_chunk_degrades_to_empty() {
         let lines: Vec<String> = (0..=EMPH_MAX_LINES).map(|i| format!("l{i}")).collect();
@@ -650,7 +651,7 @@ mod tests {
         assert!(e.theirs.iter().all(Vec::is_empty));
     }
 
-    /// .rs 扩展名产出非空语法高亮;未知扩展名优雅降级为 None
+    /// .rs produces syntax colors; unknown extensions gracefully return None.
     #[test]
     fn syntax_matches_extension_or_falls_back() {
         let mut cache = HighlightCache::default();
@@ -670,7 +671,7 @@ mod tests {
         assert!(hl.result.is_none());
     }
 
-    /// revision 变化时结果栏重算(行数随取用内容变化)
+    /// Revision changes update result highlighting and line counts after taking content.
     #[test]
     fn result_pane_rehighlights_on_revision_change() {
         let mut merge =
@@ -678,14 +679,14 @@ mod tests {
         let mut cache = HighlightCache::default();
         let before = cache.get(0, &merge, 0, false).result.as_ref().unwrap();
         assert_eq!(before.line_count(), 3);
-        // 冲突两侧都取用 → 结果行数 3 → 4
+        // Taking both conflict sides increases result lines from 3 to 4.
         merge.apply(crate::app::Side::Ours);
         merge.apply(crate::app::Side::Theirs);
         let after = cache.get(0, &merge, 1, false).result.as_ref().unwrap();
         assert_eq!(after.line_count(), 4);
     }
 
-    /// 增量重算与全量重建的着色结果完全一致(含取用 / 撤销 / 覆写序列)
+    /// Incremental colors match full rebuilds across take / undo / override sequences.
     #[test]
     fn incremental_matches_full_recompute() {
         let base = "fn a() {}\nfn b() {}\nfn c() {}\nfn d() {}\n";
@@ -695,7 +696,7 @@ mod tests {
         let mut cache = HighlightCache::default();
         let _ = cache.get(0, &merge, 0, false);
 
-        // 依次:取本地、追加远端、撤销、覆写,每步都与全量重建对比
+        // Take local, append remote, undo, then override; compare each step with a full rebuild.
         let steps: [&dyn Fn(&mut FileMerge); 4] = [
             &|m| m.apply(crate::app::Side::Ours),
             &|m| m.apply(crate::app::Side::Theirs),
@@ -716,17 +717,17 @@ mod tests {
                     assert_eq!(
                         inc.spans(idx, offset),
                         full.spans(idx, offset),
-                        "块 {idx} 行 {offset} 在第 {rev} 步后着色不一致"
+                        "highlighting differs for chunk {idx}, line {offset}, after step {rev}"
                     );
                 }
             }
         }
     }
 
-    /// 增量重算只解析变化块(其余块靠指纹 + 状态收敛命中)
+    /// Incremental updates parse only changed chunks, reusing fingerprints and converged states.
     #[test]
     fn incremental_update_skips_unchanged_chunks() {
-        // 大稳定区 + 一个冲突 + 大稳定区:单键后只应重算冲突块
+        // A conflict between large stable regions should be the only chunk reparsed after a key press.
         let stable: String = (0..200).map(|i| format!("fn f{i}() {{}}\n")).collect();
         let base = format!("{stable}fn x() {{ old() }}\n{stable}");
         let ours = format!("{stable}fn x() {{ ours() }}\n{stable}");
@@ -738,19 +739,22 @@ mod tests {
 
         let mut cache = HighlightCache::default();
         let first = cache.get(0, &merge, 0, false).result.as_ref().unwrap();
-        assert_eq!(first.parsed_lines, total, "首次构建应全量解析");
+        assert_eq!(
+            first.parsed_lines, total,
+            "initial construction must parse all lines"
+        );
 
         merge.apply(crate::app::Side::Ours);
         merge.ignore(crate::app::Side::Theirs);
         let second = cache.get(0, &merge, 1, false).result.as_ref().unwrap();
         assert!(
             second.parsed_lines <= 5,
-            "增量重算应只解析变化块(实际解析 {} 行,全文 {total} 行)",
+            "incremental update must parse only changed chunks (parsed {} of {total} lines)",
             second.parsed_lines
         );
     }
 
-    /// 三栏总行数超限的文件禁用语法高亮
+    /// Files exceeding the total pane line limit disable syntax highlighting.
     #[test]
     fn oversized_file_disables_syntax() {
         let text: String = (0..4000).map(|i| format!("l{i}\n")).collect();
@@ -758,7 +762,7 @@ mod tests {
         let mut cache = HighlightCache::default();
         let hl = cache.get(0, &merge, 0, false);
         assert!(hl.ours.is_none());
-        // 词级强调不受影响(稳定块本就为空)
+        // Word emphasis is unaffected; stable chunks already have none.
         assert_eq!(hl.emphasis.len(), merge.chunks.len());
     }
 }

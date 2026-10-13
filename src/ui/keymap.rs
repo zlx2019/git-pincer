@@ -15,60 +15,60 @@ use ratatui::crossterm::event::{KeyCode, KeyModifiers};
 
 use crate::i18n::tr_f;
 
-/// 冲突解决会话内的可绑定动作。
+/// Bindable actions in a conflict-resolution session.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub(crate) enum Action {
-    /// 取用本地侧
+    /// Take the local side
     TakeLocal,
-    /// 取用远端侧
+    /// Take the remote side
     TakeRemote,
-    /// 忽略当前块仍待处理的侧
+    /// Ignore pending sides of the current chunk
     IgnoreChunk,
-    /// 撤销当前块的决定
+    /// Undo the current chunk's decisions
     UndoChunk,
-    /// 撤销当前文件的全部决定
+    /// Undo all decisions in the current file
     UndoFile,
-    /// 用 $EDITOR 编辑当前块
+    /// Edit the current chunk in $EDITOR
     EditChunk,
-    /// 一键取用所有非冲突改动
+    /// Apply all non-conflicting changes
     ApplyNonConflict,
-    /// 移到下一个改动块
+    /// Move to the next changed chunk
     NextChange,
-    /// 移到上一个改动块
+    /// Move to the previous changed chunk
     PrevChange,
-    /// 跳到下一个未解决冲突
+    /// Jump to the next unresolved conflict
     NextConflict,
-    /// 跳到上一个未解决冲突
+    /// Jump to the previous unresolved conflict
     PrevConflict,
-    /// 视口下滚半页(脱离光标跟随)
+    /// Scroll down half a page, disabling cursor following
     ScrollDown,
-    /// 视口上滚半页(脱离光标跟随)
+    /// Scroll up half a page, disabling cursor following
     ScrollUp,
-    /// 视口左移(长行时三栏联动平移)
+    /// Scroll all three panes left for long lines
     ScrollLeft,
-    /// 视口右移(长行时三栏联动平移)
+    /// Scroll all three panes right for long lines
     ScrollRight,
-    /// 复制当前块结果
+    /// Copy the current chunk's result
     CopyChunk,
-    /// 复制整个文件结果
+    /// Copy the entire file's result
     CopyFile,
-    /// 复制当前块本地侧
+    /// Copy the current chunk's local side
     CopyLocal,
-    /// 复制当前块远端侧
+    /// Copy the current chunk's remote side
     CopyRemote,
-    /// 写盘当前文件
+    /// Write the current file
     WriteFile,
-    /// 切换到下一个文件
+    /// Switch to the next file
     NextFile,
-    /// 折叠 / 展开稳定区
+    /// Fold or unfold stable regions
     ToggleFold,
-    /// 退出会话
+    /// Quit the session
     Quit,
-    /// 打开帮助浮层
+    /// Open the help overlay
     Help,
 }
 
-/// 配置文件 `[keys]` 使用的动作名(kebab-case)。
+/// Kebab-case action names used in `[keys]` configuration.
 static ACTION_NAMES: &[(&str, Action)] = &[
     ("take-local", Action::TakeLocal),
     ("take-remote", Action::TakeRemote),
@@ -96,19 +96,19 @@ static ACTION_NAMES: &[(&str, Action)] = &[
     ("help", Action::Help),
 ];
 
-/// 一组默认按键绑定:展示上是一行(如 `u / U`),分发上可含多个键位。
+/// Default binding group displayed as one row, such as `u / U`, with multiple dispatch keys.
 struct Binding {
-    /// 组的标识动作(布局列表以此引用)
+    /// Identifying action referenced by layout lists
     id: Action,
-    /// 键位(含修饰键)→ 动作(如 u 撤销块、U 撤销整个文件同属一组)
+    /// Keys with modifiers mapped to actions, such as chunk undo (u) and file undo (U)
     keys: &'static [(KeyCode, KeyModifiers, Action)],
-    /// 提示条短文案的 i18n key;None 表示该组不进提示条
+    /// Hint-bar message key; None excludes this group from the hint bar
     hint: Option<&'static str>,
-    /// 帮助浮层文案的 i18n key
+    /// Help-overlay message key
     help: &'static str,
 }
 
-/// 全部默认绑定(单一事实来源;标签由键位派生,不在此硬编码)。
+/// All default bindings; display labels are derived from keys rather than hardcoded.
 static BINDINGS: &[Binding] = &[
     Binding {
         id: Action::TakeLocal,
@@ -256,7 +256,7 @@ static BINDINGS: &[Binding] = &[
     },
 ];
 
-/// 提示条的展示顺序(引用绑定组的标识动作)。
+/// Hint-bar display order, referencing each group's identifying action.
 static HINT_LAYOUT: &[Action] = &[
     Action::TakeLocal,
     Action::TakeRemote,
@@ -271,7 +271,7 @@ static HINT_LAYOUT: &[Action] = &[
     Action::Help,
 ];
 
-/// 帮助浮层左栏的展示顺序。
+/// Display order for the help overlay's left column.
 static HELP_LEFT: &[Action] = &[
     Action::TakeLocal,
     Action::TakeRemote,
@@ -283,7 +283,7 @@ static HELP_LEFT: &[Action] = &[
     Action::Quit,
 ];
 
-/// 帮助浮层右栏的展示顺序。
+/// Display order for the help overlay's right column.
 static HELP_RIGHT: &[Action] = &[
     Action::NextChange,
     Action::NextConflict,
@@ -297,41 +297,41 @@ static HELP_RIGHT: &[Action] = &[
     Action::Help,
 ];
 
-/// 生效的绑定组:默认表与 `[keys]` 覆盖的合成结果,标签由键位派生。
+/// Effective binding group combining defaults and `[keys]` overrides, with labels derived from keys.
 #[derive(Debug)]
 struct EffectiveBinding {
-    /// 组的标识动作
+    /// Group's identifying action
     id: Action,
-    /// 键位(含修饰键)→ 动作
+    /// Keys with modifiers mapped to actions
     keys: Vec<(KeyCode, KeyModifiers, Action)>,
-    /// 帮助浮层的按键标签(如 `u / U`)
+    /// Help-overlay key label, such as `u / U`
     label: String,
-    /// 提示条的紧凑按键标签(如 `u/U`)
+    /// Compact hint-bar key label, such as `u/U`
     hint_label: String,
-    /// 提示条短文案的 i18n key
+    /// Hint-bar message key
     hint: Option<&'static str>,
-    /// 帮助浮层文案的 i18n key
+    /// Help-overlay message key
     help: &'static str,
 }
 
-/// 进程内的生效绑定表(init 冻结;未显式 init 时惰性取默认)。
+/// Process-wide effective bindings, frozen by init or lazily defaulted when uninitialized.
 static EFFECTIVE: OnceLock<Vec<EffectiveBinding>> = OnceLock::new();
 
-/// 应用配置的 `[keys]` 覆盖并冻结生效表(进程内仅首次调用生效,
-/// 应在进入任何 TUI 之前调用)。
+/// Apply `[keys]` overrides and freeze the bindings before entering any TUI.
+/// Only the first call takes effect within the process.
 pub(crate) fn init(overrides: &HashMap<String, String>) -> Result<()> {
     let table = build(overrides)?;
     let _ = EFFECTIVE.set(table);
     Ok(())
 }
 
-/// 取生效表;未 init 时按无覆盖构建(默认构建不会失败)。
+/// Get effective bindings, building infallible defaults if init has not run.
 fn effective() -> &'static [EffectiveBinding] {
     EFFECTIVE.get_or_init(|| build(&HashMap::new()).unwrap_or_default())
 }
 
-/// 由默认表与覆盖合成生效表:被覆盖的动作以配置键替换其全部默认键位,
-/// 并做全表键位冲突检测。
+/// Combine defaults with overrides, replacing all default keys for each overridden
+/// action and checking the complete table for key conflicts.
 fn build(overrides: &HashMap<String, String>) -> Result<Vec<EffectiveBinding>> {
     let mut parsed: HashMap<Action, (KeyCode, KeyModifiers)> = HashMap::new();
     for (name, desc) in overrides {
@@ -360,7 +360,7 @@ fn build(overrides: &HashMap<String, String>) -> Result<Vec<EffectiveBinding>> {
         let mut replaced: Vec<Action> = Vec::new();
         for (code, mods, action) in binding.keys {
             match parsed.get(action) {
-                // 覆盖:该动作的全部默认键位替换为配置键(只插入一次)
+                // Replace all default keys for this action with the configured key, inserted once.
                 Some(&(new_code, new_mods)) => {
                     if !replaced.contains(action) {
                         keys.push((new_code, new_mods, *action));
@@ -396,9 +396,9 @@ fn build(overrides: &HashMap<String, String>) -> Result<Vec<EffectiveBinding>> {
     Ok(table)
 }
 
-/// 解析键位描述:单字符(区分大小写)、命名键(left / tab / f5 / space 等,
-/// 不区分大小写),可带 `ctrl+` / `alt+` / `shift+` 前缀;
-/// `shift+字母` 归一化为大写字符。无法解析返回 None。
+/// Parse case-sensitive characters or case-insensitive named keys (left / tab / f5 / space),
+/// optionally prefixed with `ctrl+` / `alt+` / `shift+`. Normalize shifted letters
+/// to uppercase characters; return None for invalid descriptions.
 fn parse_key(desc: &str) -> Option<(KeyCode, KeyModifiers)> {
     let parts: Vec<&str> = desc.split('+').map(str::trim).collect();
     let (mod_parts, key_part) = parts.split_at(parts.len() - 1);
@@ -449,7 +449,7 @@ fn parse_key(desc: &str) -> Option<(KeyCode, KeyModifiers)> {
             KeyCode::Char(c)
         }
     };
-    // shift+字母 → 大写字符;Char 键的 SHIFT 修饰无独立意义,统一并入字符
+    // Fold SHIFT into uppercase letters; Char keys do not retain a separate SHIFT modifier.
     if mods.contains(KeyModifiers::SHIFT)
         && let KeyCode::Char(c) = code
     {
@@ -459,7 +459,7 @@ fn parse_key(desc: &str) -> Option<(KeyCode, KeyModifiers)> {
     Some((code, mods))
 }
 
-/// 单个键位的展示名;`compact` 用于提示条(Tab 显示为 ⇥)。
+/// Display name for one key; `compact` uses hint-bar symbols, including an arrow for Tab.
 fn key_display(code: KeyCode, mods: KeyModifiers, compact: bool) -> String {
     let base = match code {
         KeyCode::Char(' ') => "Space".to_owned(),
@@ -479,7 +479,7 @@ fn key_display(code: KeyCode, mods: KeyModifiers, compact: bool) -> String {
     if mods.contains(KeyModifiers::ALT) {
         out.push_str("alt+");
     }
-    // Char 键的 SHIFT 已并入字符本身,只有命名键需要显示 shift+ 前缀
+    // SHIFT is encoded in Char keys; only named keys need a shift+ prefix.
     if mods.contains(KeyModifiers::SHIFT) && !matches!(code, KeyCode::Char(_)) {
         out.push_str("shift+");
     }
@@ -487,8 +487,8 @@ fn key_display(code: KeyCode, mods: KeyModifiers, compact: bool) -> String {
     out
 }
 
-/// 从组的键位派生 (帮助标签, 提示条紧凑标签):
-/// 单动作组列出全部键位(如 `h / ←`),多动作组各取首键(如 `u / U`)。
+/// Derive (help label, compact hint label) from a group's keys.
+/// Single-action groups list all keys; multi-action groups use each action's first key.
 fn derive_labels(keys: &[(KeyCode, KeyModifiers, Action)]) -> (String, String) {
     let mut actions: Vec<Action> = Vec::new();
     for (_, _, action) in keys {
@@ -521,13 +521,13 @@ fn derive_labels(keys: &[(KeyCode, KeyModifiers, Action)]) -> (String, String) {
     (label, hint_label)
 }
 
-/// 把按键事件解析为动作;未绑定返回 None。
-/// Char 键忽略 SHIFT 修饰(大小写已编码进字符本身)。
+/// Resolve a key event to an action, or None if unbound.
+/// Ignore SHIFT for Char keys because case is encoded in the character.
 pub(crate) fn action_for(code: KeyCode, mods: KeyModifiers) -> Option<Action> {
     action_in(effective(), code, mods)
 }
 
-/// 在指定表中查找按键(action_for 的纯逻辑部分,便于测试覆盖表)。
+/// Look up a key in a table: the pure part of action_for, allowing override tests.
 fn action_in(table: &[EffectiveBinding], code: KeyCode, mods: KeyModifiers) -> Option<Action> {
     let mods = match code {
         KeyCode::Char(_) => mods - KeyModifiers::SHIFT,
@@ -540,18 +540,18 @@ fn action_in(table: &[EffectiveBinding], code: KeyCode, mods: KeyModifiers) -> O
         .map(|(_, _, action)| *action)
 }
 
-/// 按标识动作取生效绑定组(布局列表引用用)。
+/// Get an effective binding group by identifying action for layout references.
 fn group(id: Action) -> Option<&'static EffectiveBinding> {
     effective().iter().find(|b| b.id == id)
 }
 
-/// 某个动作首个生效键位的紧凑标签,供界面内联的按键说明使用
-/// (如二选一卡片),改绑后自动跟随配置。
+/// Compact label for an action's first effective key, used in inline instructions
+/// such as whole-file pick cards and automatically reflecting configuration overrides.
 pub(crate) fn key_hint(action: Action) -> String {
     key_hint_in(effective(), action)
 }
 
-/// 在指定表中取动作的首个键位标签(key_hint 的纯逻辑部分,便于测试覆盖表)。
+/// Get an action's first key label from a table: the pure, testable part of key_hint.
 fn key_hint_in(table: &[EffectiveBinding], action: Action) -> String {
     table
         .iter()
@@ -561,7 +561,7 @@ fn key_hint_in(table: &[EffectiveBinding], action: Action) -> String {
         .unwrap_or_default()
 }
 
-/// 提示条条目:(紧凑按键标签, 文案 i18n key),按展示顺序。
+/// Hint-bar entries as (compact key label, message key), in display order.
 pub(crate) fn hint_entries() -> impl Iterator<Item = (&'static str, &'static str)> {
     HINT_LAYOUT.iter().filter_map(|id| {
         let binding = group(*id)?;
@@ -569,10 +569,10 @@ pub(crate) fn hint_entries() -> impl Iterator<Item = (&'static str, &'static str
     })
 }
 
-/// 帮助条目:(按键标签, 文案 i18n key)。
+/// Help entry: (key label, message key).
 pub(crate) type HelpEntry = (&'static str, &'static str);
 
-/// 帮助浮层某一栏的条目。
+/// Entries for one help-overlay column.
 fn help_entries(layout: &'static [Action]) -> Vec<HelpEntry> {
     layout
         .iter()
@@ -580,7 +580,7 @@ fn help_entries(layout: &'static [Action]) -> Vec<HelpEntry> {
         .collect()
 }
 
-/// 帮助浮层的左 / 右两栏条目。
+/// Entries for the help overlay's left and right columns.
 pub(crate) fn help_columns() -> (Vec<HelpEntry>, Vec<HelpEntry>) {
     (help_entries(HELP_LEFT), help_entries(HELP_RIGHT))
 }
@@ -589,12 +589,12 @@ pub(crate) fn help_columns() -> (Vec<HelpEntry>, Vec<HelpEntry>) {
 mod tests {
     use super::*;
 
-    /// 无覆盖构建的默认表
+    /// Default table built without overrides.
     fn default_table() -> Vec<EffectiveBinding> {
         build(&HashMap::new()).unwrap()
     }
 
-    /// 常用键解析到预期动作;未绑定键返回 None;Char 键忽略 SHIFT
+    /// Common keys resolve as expected; unbound keys return None and Char keys ignore SHIFT.
     #[test]
     fn keys_resolve_to_expected_actions() {
         let t = default_table();
@@ -607,7 +607,7 @@ mod tests {
         assert_eq!(f(KeyCode::Char('?')), Some(Action::Help));
         assert_eq!(f(KeyCode::Char('0')), None);
         assert_eq!(f(KeyCode::Esc), None);
-        // 滚动键要求 CONTROL 修饰;裸 d 未绑定,裸 u 仍是撤销
+        // Scrolling requires CONTROL; plain d is unbound and plain u still undoes.
         assert_eq!(
             action_in(&t, KeyCode::Char('d'), KeyModifiers::CONTROL),
             Some(Action::ScrollDown)
@@ -618,16 +618,16 @@ mod tests {
         );
         assert_eq!(f(KeyCode::Char('d')), None);
         assert_eq!(f(KeyCode::Char('u')), Some(Action::UndoChunk));
-        // 终端为大写字符附带的 SHIFT 修饰不影响匹配
+        // SHIFT modifiers supplied by terminals for uppercase characters do not affect matching.
         assert_eq!(
             action_in(&t, KeyCode::Char('U'), KeyModifiers::SHIFT),
             Some(Action::UndoFile)
         );
-        // 非 Char 键的修饰键需精确匹配
+        // Modifiers on non-Char keys must match exactly.
         assert_eq!(action_in(&t, KeyCode::Left, KeyModifiers::CONTROL), None);
     }
 
-    /// 默认表派生的标签与既有界面完全一致(视觉回归守卫)
+    /// Derived default labels match the existing UI to guard against visual regressions.
     #[test]
     fn default_labels_match_previous_ui() {
         let expected: [(&str, &str); 18] = [
@@ -653,16 +653,16 @@ mod tests {
         let table = default_table();
         assert_eq!(table.len(), expected.len());
         for (binding, (label, hint_label)) in table.iter().zip(expected) {
-            assert_eq!(binding.label, label, "{:?} 帮助标签漂移", binding.id);
+            assert_eq!(binding.label, label, "{:?} help label changed", binding.id);
             assert_eq!(
                 binding.hint_label, hint_label,
-                "{:?} 提示条标签漂移",
+                "{:?} hint-bar label changed",
                 binding.id
             );
         }
     }
 
-    /// 键位描述解析:命名键 / 修饰键 / shift 归一化 / 非法输入
+    /// Parse named keys, modifiers, shift normalization, and invalid descriptions.
     #[test]
     fn parse_key_descriptions() {
         assert_eq!(
@@ -698,7 +698,7 @@ mod tests {
         assert_eq!(parse_key("meta+x"), None);
     }
 
-    /// [keys] 覆盖:替换动作的全部默认键位,标签同步更新
+    /// [keys] overrides replace every default key for an action and update labels.
     #[test]
     fn overrides_replace_defaults_and_labels() {
         let overrides = HashMap::from([
@@ -710,7 +710,7 @@ mod tests {
             action_in(&table, KeyCode::Char('o'), KeyModifiers::NONE),
             Some(Action::TakeLocal)
         );
-        // 默认键位 h 与 ← 均已被替换
+        // Both default keys, h and Left, have been replaced.
         assert_eq!(
             action_in(&table, KeyCode::Char('h'), KeyModifiers::NONE),
             None
@@ -729,7 +729,7 @@ mod tests {
         assert_eq!(write.label, "ctrl+s");
     }
 
-    /// 组内单个动作覆盖:另一动作保留默认键,组标签合并展示
+    /// Overriding one group action preserves the other's defaults and combines their labels.
     #[test]
     fn partial_group_override_keeps_sibling() {
         let overrides = HashMap::from([("undo".to_owned(), "ctrl+z".to_owned())]);
@@ -746,13 +746,13 @@ mod tests {
         assert_eq!(undo.label, "ctrl+z / U");
     }
 
-    /// 内联按键说明取动作自身的首个键位,改绑后跟随配置
+    /// Inline hints use the action's first key and follow configured overrides.
     #[test]
     fn key_hint_follows_overrides() {
         let defaults = default_table();
         assert_eq!(key_hint_in(&defaults, Action::TakeLocal), "h");
         assert_eq!(key_hint_in(&defaults, Action::TakeRemote), "l");
-        // 同组的 U 属于 UndoFile,不混入 UndoChunk 的标签
+        // U belongs to UndoFile in the same group and must not enter UndoChunk's label.
         assert_eq!(key_hint_in(&defaults, Action::UndoChunk), "u");
 
         let overrides = HashMap::from([
@@ -764,7 +764,7 @@ mod tests {
         assert_eq!(key_hint_in(&table, Action::WriteFile), "ctrl+s");
     }
 
-    /// 覆盖冲突与非法输入给出可读错误
+    /// Conflicting overrides and invalid input produce readable errors.
     #[test]
     fn override_errors_are_readable() {
         let bad_action = HashMap::from([("no-such".to_owned(), "o".to_owned())]);
@@ -775,29 +775,35 @@ mod tests {
         let err = build(&bad_key).unwrap_err().to_string();
         assert!(err.contains("ctrl+") && err.contains("write"));
 
-        // 覆盖键撞上其他动作的默认键
+        // The override collides with another action's default key.
         let conflict = HashMap::from([("write".to_owned(), "h".to_owned())]);
         let err = build(&conflict).unwrap_err().to_string();
         assert!(err.contains('h'));
     }
 
-    /// 布局列表引用的组必须存在;提示条组必须携带提示文案
+    /// Layout references must identify existing groups; hint-bar groups require message keys.
     #[test]
     fn layouts_reference_existing_groups() {
         for id in HINT_LAYOUT {
-            let binding = group(*id).expect("提示条引用了不存在的绑定组");
-            assert!(binding.hint.is_some(), "{id:?} 进提示条但缺少 hint 文案");
+            let binding = group(*id).expect("hint bar references a missing binding group");
+            assert!(
+                binding.hint.is_some(),
+                "{id:?} is in the hint bar but has no hint message"
+            );
         }
         for id in HELP_LEFT.iter().chain(HELP_RIGHT) {
-            assert!(group(*id).is_some(), "帮助浮层引用了不存在的绑定组");
+            assert!(
+                group(*id).is_some(),
+                "help overlay references a missing binding group"
+            );
         }
-        // 视觉布局守卫:提示条 11 项,帮助左右两栏 8 / 10 项
+        // Layout regression guard: 11 hint entries and 8 / 10 help entries on the left / right.
         assert_eq!(hint_entries().count(), 11);
         let (left, right) = help_columns();
         assert_eq!((left.len(), right.len()), (8, 10));
     }
 
-    /// 每个绑定组的标识动作必须能从自身键位触发(防布局引用悬空)
+    /// Each group's identifying action must be reachable from its keys to keep layout references valid.
     #[test]
     fn group_ids_are_reachable_from_own_keys() {
         for binding in BINDINGS {
@@ -806,7 +812,7 @@ mod tests {
                     .keys
                     .iter()
                     .any(|(_, _, action)| *action == binding.id),
-                "组 {:?} 的标识动作不在自身键位中",
+                "group {:?} has no key for its identifying action",
                 binding.id
             );
         }

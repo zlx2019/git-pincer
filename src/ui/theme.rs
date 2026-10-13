@@ -1,9 +1,9 @@
-//! 界面主题:全部颜色的集中定义。
+//! UI themes: centralized definitions for all colors.
 //!
-//! 深色默认 Tokyo Night(暗色终端调校),浅色为 Maple Light 系配套色板;
-//! 选中提亮遵循「同色相加深增饱和」而非均匀加灰,避免颜色发浑。
-//! 用户可通过配置文件 `[theme.dark]` / `[theme.light]` 按颜色名覆盖,
-//! 覆盖在 [`Theme::select`] 构建时应用。
+//! The dark default is Tokyo Night, tuned for dark terminals; light uses Maple Light.
+//! Selection increases contrast and saturation within the same hue to avoid muddy colors.
+//! Users can override named colors in `[theme.dark]` / `[theme.light]` configuration;
+//! overrides are applied when [`Theme::select`] builds a theme.
 
 use std::collections::HashMap;
 use std::sync::OnceLock;
@@ -16,7 +16,7 @@ use crate::i18n::tr_f;
 
 use super::rows::ChangeType;
 
-/// 可覆盖的颜色名全集:(名字, 是否为「(普通, 选中)」双色对)。
+/// All overridable colors: (name, whether the value is a (normal, selected) pair).
 const COLOR_FIELDS: &[(&str, bool)] = &[
     ("fg_dim", false),
     ("fg_bright", false),
@@ -49,30 +49,30 @@ const COLOR_FIELDS: &[(&str, bool)] = &[
     ("emph_conflict", true),
 ];
 
-/// 解析后的单条覆盖值。
+/// One parsed color override.
 #[derive(Debug, Clone, Copy)]
 enum OverrideValue {
-    /// 单色
+    /// Single color
     Single((u8, u8, u8)),
-    /// (普通, 选中) 双色
+    /// (Normal, selected) color pair
     Pair((u8, u8, u8), (u8, u8, u8)),
 }
 
-/// 深 / 浅两套已解析的覆盖表。
+/// Parsed override maps for both dark and light themes.
 type Overrides = HashMap<String, OverrideValue>;
 
-/// 进程内的主题覆盖(init 冻结;未 init 视同无覆盖)。
+/// Process-wide theme overrides, frozen by init; empty before initialization.
 static OVERRIDES: OnceLock<(Overrides, Overrides)> = OnceLock::new();
 
-/// 校验并应用配置的 `[theme]` 覆盖(进程内仅首次调用生效,
-/// 应在构建任何 [`Theme`] 之前调用)。
+/// Validate and apply `[theme]` overrides before constructing any [`Theme`].
+/// Only the first call takes effect within the process.
 pub(crate) fn init_overrides(section: &ThemeSection) -> Result<()> {
     let parsed = (validate(&section.dark)?, validate(&section.light)?);
     let _ = OVERRIDES.set(parsed);
     Ok(())
 }
 
-/// 校验一套覆盖:颜色名必须存在,值形态(单色 / 双色)与字段匹配且为合法 hex。
+/// Validate override names, single/pair value shapes, and hexadecimal color syntax.
 fn validate(raw: &HashMap<String, ColorValue>) -> Result<Overrides> {
     let mut out = Overrides::new();
     for (name, value) in raw {
@@ -108,74 +108,74 @@ fn validate(raw: &HashMap<String, ColorValue>) -> Result<Overrides> {
     Ok(out)
 }
 
-/// 界面主题:所有渲染颜色的单一来源。
+/// UI theme: the single source of all rendering colors.
 #[derive(Debug, Clone)]
 pub(crate) struct Theme {
-    /// 是否为浅色变体(语法高亮据此选择 Maple Light / Dark)
+    /// Whether this is the light variant, selecting Maple Light / Dark syntax colors
     pub(crate) light: bool,
-    /// 次要文字 / 行号
+    /// Secondary text and line numbers
     pub(crate) fg_dim: Color,
-    /// 选中块的行号 / 高亮文字
+    /// Selected chunk line numbers and highlighted text
     pub(crate) fg_bright: Color,
-    /// 蓝(单侧改动)
+    /// Blue (single-side changes)
     pub(crate) blue: Color,
-    /// 绿(一致改动 / 就绪)
+    /// Green (identical changes / ready state)
     pub(crate) green: Color,
-    /// 红(冲突)
+    /// Red (conflicts)
     pub(crate) red: Color,
-    /// 琥珀(消息与提示)
+    /// Amber (messages and hints)
     pub(crate) amber: Color,
-    /// 面板边框
+    /// Pane borders
     pub(crate) border: Color,
-    /// 徽章前景(深色,配合强调色背景)
+    /// Badge foreground, dark against an accent background
     pub(crate) badge_fg: Color,
-    /// 滚动条滑块
+    /// Scrollbar thumb
     pub(crate) scrollbar_thumb: Color,
-    /// 键帽前景(底部提示条)
+    /// Keycap foreground in the bottom hint bar
     pub(crate) keycap_fg: Color,
-    /// 键帽背景(底部提示条)
+    /// Keycap background in the bottom hint bar
     pub(crate) keycap_bg: Color,
-    /// 提示条描述文字(比 fg_dim 亮一档,保证可读)
+    /// Hint descriptions, brighter than fg_dim for readability
     pub(crate) hint_fg: Color,
-    /// 菜单 logo 中无自带颜色字符的着色(Rust 橙)
+    /// Rust orange for menu logo characters without embedded colors
     pub(crate) logo: Color,
-    /// 结果栏「待解决」占位文字
+    /// Pending-resolution placeholder in the result pane
     pub(crate) placeholder_fg: Color,
-    /// RPG 菜单:双线窗框与嵌入标题(米白)
+    /// RPG menu: double-line window borders and embedded titles (off-white)
     pub(crate) rpg_frame: Color,
-    /// RPG 菜单:强调橙(选中行 / 光标符号)
+    /// RPG menu: orange accent for selected rows and cursor symbols
     pub(crate) rpg_accent: Color,
-    /// RPG 菜单:HP 条(绿)
+    /// RPG menu: HP gauge (green)
     pub(crate) rpg_hp: Color,
-    /// RPG 菜单:MP 条(蓝)
+    /// RPG menu: MP gauge (blue)
     pub(crate) rpg_mp: Color,
-    /// RPG 菜单:EXP 条(橙黄)
+    /// RPG menu: EXP gauge (yellow-orange)
     pub(crate) rpg_exp: Color,
-    /// RPG 菜单:状态条空槽
+    /// RPG menu: empty gauge slots
     pub(crate) rpg_gauge_empty: Color,
-    /// RPG 菜单:等级数字(金)
+    /// RPG menu: level number (gold)
     pub(crate) rpg_gold: Color,
-    /// 色带背景:修改(普通, 选中)
+    /// Modified band backgrounds (normal, selected)
     band_modified: (Color, Color),
-    /// 色带背景:新增(普通, 选中)
+    /// Added band backgrounds (normal, selected)
     band_added: (Color, Color),
-    /// 色带背景:删除(普通, 选中)
+    /// Deleted band backgrounds (normal, selected)
     band_deleted: (Color, Color),
-    /// 色带背景:冲突(普通, 选中)
+    /// Conflict band backgrounds (normal, selected)
     band_conflict: (Color, Color),
-    /// 词级强调背景:修改(普通, 选中),同色相比色带亮两档
+    /// Modified word-emphasis backgrounds (normal, selected), brighter than bands in the same hue
     emph_modified: (Color, Color),
-    /// 词级强调背景:新增(普通, 选中)
+    /// Added word-emphasis backgrounds (normal, selected)
     emph_added: (Color, Color),
-    /// 词级强调背景:删除(普通, 选中)
+    /// Deleted word-emphasis backgrounds (normal, selected)
     emph_deleted: (Color, Color),
-    /// 词级强调背景:冲突(普通, 选中)
+    /// Conflict word-emphasis backgrounds (normal, selected)
     emph_conflict: (Color, Color),
 }
 
 impl Theme {
-    /// 按变体选择主题:浅色终端用 [`Theme::light`],否则 [`Theme::tokyo_night`];
-    /// 随后应用配置文件的同变体颜色覆盖。
+    /// Select [`Theme::light`] for light terminals, otherwise [`Theme::tokyo_night`],
+    /// then apply configured overrides for that variant.
     pub(crate) fn select(light: bool) -> Self {
         let mut theme = if light {
             Self::light()
@@ -195,7 +195,7 @@ impl Theme {
         theme
     }
 
-    /// 按名字写入一个颜色覆盖;未知名字返回 false(名字集见 [`COLOR_FIELDS`])。
+    /// Set a named color override; return false for names absent from [`COLOR_FIELDS`].
     fn set_color(&mut self, name: &str, value: OverrideValue) -> bool {
         let single = |rgb: (u8, u8, u8)| term_color(rgb.0, rgb.1, rgb.2);
         match (name, value) {
@@ -245,7 +245,7 @@ impl Theme {
         true
     }
 
-    /// Tokyo Night 默认主题。
+    /// Default Tokyo Night theme.
     pub(crate) fn tokyo_night() -> Self {
         Self {
             light: false,
@@ -281,7 +281,7 @@ impl Theme {
         }
     }
 
-    /// 浅色主题(适配白底终端;强调色取自 Maple Light 系,色带为浅色粉彩)。
+    /// Light theme for white terminals, with Maple Light accents and pastel bands.
     pub(crate) fn light() -> Self {
         Self {
             light: true,
@@ -317,8 +317,8 @@ impl Theme {
         }
     }
 
-    /// 各改动类型的色带背景(IDEA 语义:蓝=修改、绿=新增、灰=删除、红=冲突);
-    /// 选中版同色相加深提亮。
+    /// Change band backgrounds: blue=modified, green=added, gray=deleted, red=conflict.
+    /// Selected variants increase contrast within the same hue.
     pub(crate) fn band_bg(&self, change: ChangeType, current: bool) -> Option<Color> {
         let (normal, selected) = match change {
             ChangeType::None => return None,
@@ -330,7 +330,7 @@ impl Theme {
         Some(if current { selected } else { normal })
     }
 
-    /// 词级强调的背景色(比色带亮两档,同色相)。
+    /// Word-emphasis background, brighter than the band in the same hue.
     pub(crate) fn emph_bg(&self, change: ChangeType, current: bool) -> Color {
         let (normal, selected) = match change {
             ChangeType::Added => self.emph_added,
@@ -341,7 +341,7 @@ impl Theme {
         if current { selected } else { normal }
     }
 
-    /// 各改动类型的强调色(gutter 符号使用,与色带同色相)。
+    /// Change accents for gutter symbols, matching the bands' hues.
     pub(crate) fn accent(&self, change: ChangeType) -> Color {
         match change {
             ChangeType::Modified => self.blue,
@@ -358,11 +358,11 @@ impl Default for Theme {
     }
 }
 
-/// 依终端能力生成颜色:支持真彩时直出 RGB,否则量化到 xterm-256 调色板。
+/// Use RGB on true-color terminals, otherwise quantize to the xterm-256 palette.
 ///
-/// 不支持 24-bit 色的终端(如 macOS Terminal.app)会把 `38;2;R;G;B`
-/// 的参数拆开逐个解释,R 恰为 5/6 时会被当成 SGR 闪烁属性,
-/// 表现为部分文字持续闪烁;量化为 `38;5;n` 的 256 色则所有终端都能正确解析。
+/// Terminals without 24-bit color, such as macOS Terminal.app, may interpret
+/// `38;2;R;G;B` parameters separately, treating R=5/6 as SGR blinking attributes.
+/// Quantizing to `38;5;n` avoids this unintended text blinking.
 pub(crate) fn term_color(r: u8, g: u8, b: u8) -> Color {
     static TRUECOLOR: OnceLock<bool> = OnceLock::new();
     let truecolor = *TRUECOLOR.get_or_init(|| {
@@ -378,10 +378,10 @@ pub(crate) fn term_color(r: u8, g: u8, b: u8) -> Color {
     }
 }
 
-/// 将 RGB 量化到 xterm-256 调色板:16-231 的 6×6×6 色立方与
-/// 232-255 的灰阶各取最近色,再按欧氏距离二选一。
+/// Quantize RGB to xterm-256 by comparing the nearest color in the 6x6x6 cube
+/// (16-231) with the nearest grayscale entry (232-255), using Euclidean distance.
 fn rgb_to_xterm256(r: u8, g: u8, b: u8) -> u8 {
-    // 色立方 6 级色阶:0, 95, 135, 175, 215, 255
+    // Six color-cube levels: 0, 95, 135, 175, 215, 255.
     let level = |v: u8| -> i32 {
         if v < 48 {
             0
@@ -398,7 +398,7 @@ fn rgb_to_xterm256(r: u8, g: u8, b: u8) -> u8 {
     let (ri, gi, bi) = (level(r as u8), level(g as u8), level(b as u8));
     let cube_dist = sq(r, level_value(ri)) + sq(g, level_value(gi)) + sq(b, level_value(bi));
 
-    // 灰阶 24 级:8, 18, …, 238
+    // Twenty-four grayscale levels: 8, 18, ..., 238.
     let avg = (r + g + b) / 3;
     let gray_idx = ((avg - 3) / 10).clamp(0, 23);
     let gray_value = 8 + 10 * gray_idx;
@@ -411,7 +411,7 @@ fn rgb_to_xterm256(r: u8, g: u8, b: u8) -> u8 {
     }
 }
 
-/// 从环境推断终端是否为浅色背景;检测不到时按深色处理。
+/// Detect a light terminal background from the environment, defaulting to dark.
 pub(crate) fn detect_light() -> bool {
     std::env::var("COLORFGBG")
         .ok()
@@ -419,8 +419,8 @@ pub(crate) fn detect_light() -> bool {
         .unwrap_or(false)
 }
 
-/// 解析 `COLORFGBG`(konsole / rxvt / mintty 等设置,格式 "fg;bg" 或
-/// "fg;default;bg"):最后一段为背景色号,ANSI 惯例 7 / 15 为白系。
+/// Parse `COLORFGBG`, set by konsole / rxvt / mintty as "fg;bg" or "fg;default;bg".
+/// The last field is the background color; ANSI colors 7 and 15 are white variants.
 fn parse_colorfgbg(value: &str) -> Option<bool> {
     let bg = value.split(';').next_back()?.trim().parse::<u8>().ok()?;
     Some(bg == 7 || bg == 15)
@@ -430,28 +430,28 @@ fn parse_colorfgbg(value: &str) -> Option<bool> {
 mod tests {
     use super::*;
 
-    /// RGB → xterm-256 量化:色立方精确值、灰阶、黑白端点
+    /// RGB to xterm-256: exact cube values, grayscale, and black/white endpoints.
     #[test]
     fn rgb_quantizes_to_xterm256() {
-        assert_eq!(rgb_to_xterm256(0, 0, 0), 16); // 色立方原点
-        assert_eq!(rgb_to_xterm256(255, 255, 255), 231); // 色立方白
-        assert_eq!(rgb_to_xterm256(255, 0, 0), 196); // 纯红
-        assert_eq!(rgb_to_xterm256(95, 135, 175), 67); // 精确落在色阶 (1,2,3)
-        assert_eq!(rgb_to_xterm256(128, 128, 128), 244); // 中灰走灰阶
+        assert_eq!(rgb_to_xterm256(0, 0, 0), 16); // Cube origin.
+        assert_eq!(rgb_to_xterm256(255, 255, 255), 231); // Cube white.
+        assert_eq!(rgb_to_xterm256(255, 0, 0), 196); // Pure red.
+        assert_eq!(rgb_to_xterm256(95, 135, 175), 67); // Exact cube levels (1, 2, 3).
+        assert_eq!(rgb_to_xterm256(128, 128, 128), 244); // Mid-gray uses grayscale.
     }
 
-    /// COLORFGBG 各种格式的背景色判定
+    /// Background detection across COLORFGBG formats.
     #[test]
     fn parse_colorfgbg_variants() {
-        assert_eq!(parse_colorfgbg("0;15"), Some(true)); // 白底
-        assert_eq!(parse_colorfgbg("15;0"), Some(false)); // 黑底
-        assert_eq!(parse_colorfgbg("0;default;7"), Some(true)); // rxvt 三段式
-        assert_eq!(parse_colorfgbg("12;8"), Some(false)); // 深灰底
-        assert_eq!(parse_colorfgbg("garbage"), None); // 无法解析
+        assert_eq!(parse_colorfgbg("0;15"), Some(true)); // White background.
+        assert_eq!(parse_colorfgbg("15;0"), Some(false)); // Black background.
+        assert_eq!(parse_colorfgbg("0;default;7"), Some(true)); // Three-field rxvt format.
+        assert_eq!(parse_colorfgbg("12;8"), Some(false)); // Dark gray background.
+        assert_eq!(parse_colorfgbg("garbage"), None); // Invalid input.
         assert_eq!(parse_colorfgbg(""), None);
     }
 
-    /// 两套主题的色带都齐全,且浅色变体的标志位正确
+    /// Both themes define all bands and correctly identify the light variant.
     #[test]
     fn both_variants_provide_bands() {
         for theme in [Theme::tokyo_night(), Theme::light()] {
@@ -462,7 +462,7 @@ mod tests {
         assert!(!Theme::select(false).light);
     }
 
-    /// COLOR_FIELDS 中的每个名字都能实际写入;形态不匹配与未知名被拒
+    /// Every COLOR_FIELDS name maps to a field; reject incorrect shapes and unknown names.
     #[test]
     fn every_listed_color_is_settable() {
         let mut theme = Theme::tokyo_night();
@@ -478,13 +478,19 @@ mod tests {
                     OverrideValue::Pair((1, 2, 3), (4, 5, 6)),
                 )
             };
-            assert!(theme.set_color(name, matching), "{name} 未接线到字段");
-            assert!(!theme.set_color(name, wrong), "{name} 接受了错误形态");
+            assert!(
+                theme.set_color(name, matching),
+                "{name} is not mapped to a field"
+            );
+            assert!(
+                !theme.set_color(name, wrong),
+                "{name} accepted the wrong value shape"
+            );
         }
         assert!(!theme.set_color("nope", OverrideValue::Single((0, 0, 0))));
     }
 
-    /// 覆盖校验:合法输入通过;未知名 / 非法 hex / 形态错误给出可读错误
+    /// Accept valid overrides; report unknown names, invalid hex, and incorrect value shapes.
     #[test]
     fn validate_rejects_bad_overrides() {
         let single = |v: &str| ColorValue::Single(v.to_owned());
@@ -503,7 +509,7 @@ mod tests {
         let bad_hex = HashMap::from([("blue".to_owned(), single("#zz0000"))]);
         assert!(validate(&bad_hex).is_err());
 
-        // 单色字段给了双色对 / 双色字段给了单色
+        // A pair supplied for a single-color field, and vice versa.
         let wrong_shape = HashMap::from([("blue".to_owned(), pair("#000000", "#111111"))]);
         assert!(validate(&wrong_shape).is_err());
         let wrong_shape = HashMap::from([("band_added".to_owned(), single("#000000"))]);

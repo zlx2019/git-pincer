@@ -8,7 +8,7 @@ use anyhow::Result;
 use crate::git::{Git, RepoState};
 use crate::i18n::{tr, tr_f};
 
-/// 运行 abort 子命令。
+/// Run the abort subcommand.
 pub fn run(verbose: bool, dir: &Path) -> Result<()> {
     let git = Git::discover(dir, verbose)?;
     let state = git.state()?;

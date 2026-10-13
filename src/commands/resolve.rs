@@ -9,8 +9,8 @@ use crate::git::{ConflictedFile, Git, RepoState, Stage};
 use crate::i18n::{tr, tr_f};
 use crate::ui::{self, Outcome};
 
-/// 冲突解决主循环:解决全部文件 → `--continue` → 重新探测,
-/// 直到仓库回到干净状态(rebase 可能经历多轮冲突)。
+/// Resolve all files, run `--continue`, and probe again until the operation finishes.
+/// A rebase may require multiple rounds of conflict resolution.
 pub fn resolve_loop(git: &Git, light: bool) -> Result<()> {
     loop {
         let files = git.conflicted_files()?;
@@ -20,13 +20,13 @@ pub fn resolve_loop(git: &Git, light: bool) -> Result<()> {
                 println!("[git-pincer] {}", tr("resolve.all_done"));
                 return Ok(());
             }
-            // 透传执行,git 与钩子的输出实时流向终端
+            // Stream Git and hook output directly to the terminal.
             println!("[git-pincer] $ git {} --continue", state.op_name());
             let status = git.continue_op(state)?;
             if status.success() {
                 continue;
             }
-            // 非零退出:rebase 的下一个 commit 又冲突了则继续循环,否则如实报错
+            // A nonzero exit may mean the next rebase commit conflicted; otherwise report failure.
             if git.conflicted_files()?.is_empty() {
                 bail!(
                     "{}",
@@ -54,12 +54,12 @@ pub fn resolve_loop(git: &Git, light: bool) -> Result<()> {
     }
 }
 
-/// 菜单转入的冲突解决:复用移交的终端直接进入第一轮会话,
-/// 全程不退出 alternate screen(消除菜单 → 冲突界面的闪屏)。
+/// Resolve conflicts from the menu using its transferred terminal for the first round.
+/// Stay in the alternate screen to avoid flicker during the transition.
 ///
-/// 命令行与捕获的 git 输出在首个会话结束、终端恢复之后才补进
-/// 滚动历史,先于任何 `--continue` 的透传输出,顺序与原流程一致;
-/// 后续轮次(多轮 rebase 等)交回常规 [`resolve_loop`]。
+/// Replay the command and captured Git output after the first session restores
+/// the terminal, before any streamed `--continue` output, preserving output order.
+/// Subsequent rounds use the regular [`resolve_loop`].
 pub(crate) fn resolve_from_menu(
     git: &Git,
     light: bool,
@@ -69,11 +69,11 @@ pub(crate) fn resolve_from_menu(
 ) -> Result<()> {
     let files = git.conflicted_files()?;
     let outcome = if files.is_empty() {
-        // 兜底:已无冲突可解(如探测竞态),恢复终端走常规流程
+        // If conflicts disappeared (for example, due to a race), restore and use the regular loop.
         ratatui::restore();
         None
     } else {
-        // 会话构建失败也必须恢复终端,否则错误信息会丢在 alternate screen 里
+        // Restore the terminal on session construction failure so errors remain visible.
         match build_session(git, &files, true) {
             Ok(mut session) => Some(ui::run_session_in(
                 terminal,
@@ -88,7 +88,7 @@ pub(crate) fn resolve_from_menu(
         }
     };
 
-    // 终端已恢复:补回命令历史与捕获的 git 输出
+    // The terminal is restored; replay the command and captured Git output.
     println!("[git-pincer] $ git {cmd_line}");
     print!("{}", String::from_utf8_lossy(&captured.stdout));
     eprint!("{}", String::from_utf8_lossy(&captured.stderr));
@@ -99,8 +99,8 @@ pub(crate) fn resolve_from_menu(
     resolve_loop(git, light)
 }
 
-/// 落盘一个已解决的文件:文本写入合并结果并 `git add`;二选一条目经 git
-/// 整条取用所选一侧(检出该侧,或在该侧已删除时删除文件),不经文件系统写入。
+/// Persist a resolved file: write and stage text, or let Git check out the chosen
+/// side of a whole-file pick (removing the file if that side is deleted).
 pub fn persist(git: &Git, files: &[ConflictedFile], entry: &FileEntry) -> Result<()> {
     match entry {
         FileEntry::Text(merge) => {
@@ -122,24 +122,24 @@ pub fn persist(git: &Git, files: &[ConflictedFile], entry: &FileEntry) -> Result
     Ok(())
 }
 
-/// 由冲突文件列表构建会话:读取三份 stage 内容;子模块、符号链接、修改 / 删除
-/// 冲突与含 NUL 的二进制文件不能逐块合并,降级为整条二选一。
+/// Build a session from conflicted files and their three index stages. Submodules,
+/// symlinks, modify/delete conflicts, and NUL-containing binaries use whole-file picks.
 ///
-/// 全部 stage 的 blob 用一个 `git cat-file --batch` 进程按序批量读回,
-/// 避免逐文件逐 stage spawn 进程。`quiet` 抑制逐文件进度打印
-/// (菜单移交终端时 alternate screen 仍活跃,打印会破坏画面)。
+/// Read all stage blobs in order through one `git cat-file --batch` process.
+/// `quiet` suppresses progress output while the menu's alternate screen is active,
+/// preventing printed messages from corrupting the display.
 pub fn build_session(git: &Git, files: &[ConflictedFile], quiet: bool) -> Result<Session> {
     let state = git.state()?;
     let oids: Vec<&str> = files
         .iter()
-        // 子模块的提交不在本仓库对象库中,读取会失败并阻塞整轮会话
+        // Submodule commits may not exist in this object database and would fail the session.
         .filter(|f| !f.is_submodule())
         .flat_map(|f| [&f.base, &f.ours, &f.theirs])
         .flatten()
         .map(|stage| stage.oid.as_str())
         .collect();
     let mut blobs = git.read_blobs(&oids)?.into_iter();
-    // 应答与请求同序:缺失的 stage 不在请求中,取 None
+    // Responses follow request order; missing stages were not requested and map to None.
     let mut take = |stage: &Option<Stage>| -> Option<Vec<u8>> {
         stage.as_ref().map(|_| blobs.next().unwrap_or_default())
     };
@@ -160,7 +160,7 @@ pub fn build_session(git: &Git, files: &[ConflictedFile], quiet: bool) -> Result
             );
         }
         let path = file.path.clone();
-        // 子模块:不读取内容(其 stage 不在批量请求中),两侧以记录的提交 id 展示
+        // Submodule stages were not requested; display each side's recorded commit ID.
         if file.is_submodule() {
             let commit = |stage: &Option<Stage>| stage.as_ref().map(|s| s.oid.clone().into_bytes());
             entries.push(FileEntry::Pick {
@@ -175,7 +175,7 @@ pub fn build_session(git: &Git, files: &[ConflictedFile], quiet: bool) -> Result
         let base = take(&file.base);
         let ours = take(&file.ours);
         let theirs = take(&file.theirs);
-        // 符号链接:链接目标不能按文本合并,写盘也不能经文件系统(会写穿链接)
+        // Symlink targets cannot be merged as text or written through the filesystem.
         if file.is_symlink() {
             entries.push(FileEntry::Pick {
                 path,
@@ -186,8 +186,8 @@ pub fn build_session(git: &Git, files: &[ConflictedFile], quiet: bool) -> Result
             });
             continue;
         }
-        // 修改 / 删除冲突:逐块合并「修改」与「整文件删除」没有意义,
-        // 整文件二选一(与 IDEA / git mergetool 一致),删除侧为 None
+        // Modify/delete conflicts require a whole-file choice, as in IDEA / git mergetool.
+        // The deleted side is represented by None.
         if ours.is_none() || theirs.is_none() {
             entries.push(FileEntry::Pick {
                 path,

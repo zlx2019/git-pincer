@@ -7,14 +7,14 @@
 //! is resolved, the current chunk is highlighted, and `?` shows the full key
 //! reference.
 //!
-//! 模块拆分:
-//! - [`theme`][] — 颜色集中定义
-//! - [`keymap`][] — 按键绑定的单一事实来源(分发 / 提示条 / 帮助共用)
-//! - [`rows`][] — 渲染行数据结构与构建(折叠 / 占位)
-//! - [`highlight`][] — 词级强调与语法高亮的计算与缓存
-//! - [`panes`][] — 三栏正文渲染
-//! - [`chrome`][] — 界面整体绘制(状态栏 / 提示条 / 帮助浮层 / 二进制视图)
-//! - 本文件 — 事件主循环与按键分发
+//! Modules:
+//! - [`theme`][]: centralized color definitions
+//! - [`keymap`][]: shared key bindings for dispatch, hints, and help
+//! - [`rows`][]: render-row structures and construction, including folding and placeholders
+//! - [`highlight`][]: word emphasis and syntax highlighting computation and caching
+//! - [`panes`][]: three-pane body rendering
+//! - [`chrome`][]: status bar, hints, help overlay, and binary view
+//! - This module: event loop and key dispatch
 
 mod chrome;
 mod highlight;
@@ -38,62 +38,62 @@ pub use chrome::draw;
 pub(crate) use menu::{MenuItem, MenuSession};
 pub(crate) use theme::{detect_light, init_overrides as init_theme_overrides};
 
-/// 会话结束方式。
+/// How a session ended.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Outcome {
-    /// 所有文件已解决并写盘
+    /// All files resolved and written
     Completed,
-    /// 用户中途退出(现场保留,可再次进入)
+    /// User quit early; the operation remains available to resume
     Quit,
 }
 
-/// UI 的瞬时状态(消息条与浮层开关)。
+/// Transient UI state, including messages and overlay visibility.
 #[derive(Debug, Default)]
 pub struct UiState {
-    /// 底部消息条内容
+    /// Bottom message bar content
     pub message: String,
-    /// 是否显示帮助浮层
+    /// Whether the help overlay is visible
     pub show_help: bool,
-    /// 是否处于「再按一次 q 退出」的确认态
+    /// Whether another q press will confirm quitting
     pub pending_quit: bool,
-    /// 界面主题
+    /// UI theme
     pub(crate) theme: theme::Theme,
-    /// 高亮信息缓存(词级强调 / 语法高亮)
+    /// Word emphasis and syntax highlighting cache
     pub(crate) cache: highlight::HighlightCache,
-    /// 渲染行缓存(纯导航按键零重建)
+    /// Render-row cache, reused during pure navigation
     pub(crate) rows: rows::RowCache,
-    /// 状态修订号:改动合并内容的按键后自增,用于结果栏语法高亮与
-    /// 渲染行缓存的失效重算
+    /// Revision incremented when merge content changes, invalidating result syntax
+    /// highlighting and render-row caches
     pub(crate) revision: u64,
-    /// 待应用的手动滚动量(半页为单位,正数向下;绘制时消费)
+    /// Pending manual scroll in half-pages, positive downward; consumed during drawing
     pub(crate) scroll_request: isize,
-    /// 待应用的水平平移量(固定列步长为单位,正数向右;绘制时消费)
+    /// Pending horizontal scroll in fixed column steps, positive rightward; consumed during drawing
     pub(crate) hscroll_request: isize,
 }
 
-/// 运行交互会话直至完成或退出。
+/// Run an interactive session until completion or quitting.
 ///
-/// `write_file` 负责把解决后的文件落盘(git 模式下还会顺带 `git add`;
-/// 二选一条目由调用方决定落盘方式);`light` 为 true 时使用浅色主题
-/// (适配浅色终端背景)。
+/// `write_file` persists resolved files and stages them in Git mode; the caller
+/// determines how whole-file picks are persisted. `light` selects the light theme
+/// for terminals with light backgrounds.
 pub fn run_session(
     session: &mut Session,
     write_file: &mut dyn FnMut(&FileEntry) -> Result<()>,
     light: bool,
 ) -> Result<Outcome> {
-    // ratatui::init 在无 TTY 时会直接 panic,这里先行拦截给出可读错误
-    // (如在管道 / CI 中误运行时)
+    // ratatui::init panics without a TTY; report a readable error first,
+    // for example when accidentally invoked in a pipeline or CI.
     if !std::io::stdout().is_terminal() {
         anyhow::bail!("{}", tr("common.need_tty_resolve"));
     }
     run_session_in(ratatui::init(), session, write_file, light)
 }
 
-/// 在移交的终端现场上运行交互会话(菜单转入冲突解决时复用,
-/// 全程不退出 alternate screen,避免闪屏);结束时恢复终端。
+/// Run a session on a transferred terminal, keeping the menu-to-resolver transition
+/// in the alternate screen to avoid flicker. Restore the terminal when finished.
 ///
-/// 不做预清屏:ratatui 按缓冲差量重绘,首帧一次性覆盖上一页,
-/// 中间不出现空白闪帧。
+/// Do not clear first: ratatui's buffer diff replaces the previous page in the first
+/// frame without an intermediate blank frame.
 pub(crate) fn run_session_in(
     mut terminal: DefaultTerminal,
     session: &mut Session,
@@ -105,7 +105,7 @@ pub(crate) fn run_session_in(
     result
 }
 
-/// 事件主循环:绘制 → 读键 → 更新状态。
+/// Event loop: draw, read a key, update state.
 fn event_loop(
     terminal: &mut DefaultTerminal,
     session: &mut Session,
@@ -125,20 +125,20 @@ fn event_loop(
             continue;
         }
 
-        // 帮助浮层打开时,任意键关闭
+        // Any key closes the help overlay.
         if ui.show_help {
             ui.show_help = false;
             continue;
         }
-        // Ctrl+C 遵循终端惯例等价于退出键(raw mode 下不会产生 SIGINT,
-        // 不处理会让用户以为程序卡死)
+        // Treat Ctrl+C as quit: raw mode does not generate SIGINT, so ignoring it
+        // would make the application appear unresponsive.
         let action =
             if key.code == KeyCode::Char('c') && key.modifiers.contains(KeyModifiers::CONTROL) {
                 Some(Action::Quit)
             } else {
                 keymap::action_for(key.code, key.modifiers)
             };
-        // 除退出键外的任意键(含未绑定键)取消退出确认
+        // Any other key, including an unbound key, cancels quit confirmation.
         if action != Some(Action::Quit) {
             ui.pending_quit = false;
         }
@@ -158,14 +158,14 @@ fn event_loop(
             Action::Help => ui.show_help = true,
             Action::NextFile => session.next_file(),
             Action::ToggleFold => session.folded = !session.folded,
-            // 手动滚动只记录请求,行数与钳制在绘制时按视口高度结算
+            // Record scroll requests; drawing computes and clamps rows using viewport height.
             Action::ScrollDown => ui.scroll_request += 1,
             Action::ScrollUp => ui.scroll_request -= 1,
             Action::ScrollRight => ui.hscroll_request += 1,
             Action::ScrollLeft => ui.hscroll_request -= 1,
             Action::WriteFile => {
                 if write_current(session, write_file, &mut ui)? {
-                    // 写盘会自动应用非冲突改动,结果栏内容可能变化
+                    // Writing automatically applies non-conflicts and may change result content.
                     ui.revision += 1;
                     if session.all_written() {
                         return Ok(Outcome::Completed);
@@ -193,11 +193,11 @@ fn event_loop(
     }
 }
 
-/// 处理作用于当前文件的普通动作;返回是否改动了合并内容(结果栏高亮失效用)。
+/// Handle current-file actions; return whether content changed to invalidate result highlighting.
 fn handle_file_key(session: &mut Session, action: Action, ui: &mut UiState) -> bool {
     match session.current_file_mut() {
         FileEntry::Text(merge) => {
-            // 任何作用于光标块的动作都恢复视口跟随(纯滚动不经过此处)
+            // Chunk actions restore cursor following; pure scrolling does not reach here.
             merge.follow = true;
             match action {
                 Action::TakeLocal => {
@@ -208,7 +208,7 @@ fn handle_file_key(session: &mut Session, action: Action, ui: &mut UiState) -> b
                     merge.apply(Side::Theirs);
                     true
                 }
-                // 忽略当前块所有仍待处理的侧(已取用的内容保留)
+                // Ignore all pending sides of the current chunk, preserving applied content.
                 Action::IgnoreChunk => {
                     merge.ignore(Side::Ours);
                     merge.ignore(Side::Theirs);
@@ -244,8 +244,8 @@ fn handle_file_key(session: &mut Session, action: Action, ui: &mut UiState) -> b
                     merge.prev_conflict();
                     false
                 }
-                // 复制动作(终端框选会横跨三栏,复制键绕开这个限制):
-                // 块结果 / 整个文件结果 / 块本地侧 / 块远端侧
+                // Copy keys avoid terminal selections spanning all three panes:
+                // chunk result / file result / local chunk / remote chunk.
                 Action::CopyChunk => {
                     let lines = merge.current_content(merge.cursor);
                     ui.message = copy_feedback(&lines, tr("ui.copy_chunk"));
@@ -283,7 +283,7 @@ fn handle_file_key(session: &mut Session, action: Action, ui: &mut UiState) -> b
     }
 }
 
-/// 复制若干行到剪贴板并生成消息条反馈。
+/// Copy lines to the clipboard and generate message-bar feedback.
 fn copy_feedback(lines: &[String], what: &str) -> String {
     match copy_to_clipboard(&lines.join("\n")) {
         Ok(()) => tr_f(
@@ -294,9 +294,9 @@ fn copy_feedback(lines: &[String], what: &str) -> String {
     }
 }
 
-/// 把文本写入系统剪贴板:依次尝试 pbcopy(macOS)/ xclip(X11)/ wl-copy(Wayland),
-/// 都不可用时退回 OSC 52 转义序列——由终端代写剪贴板,覆盖 Windows、
-/// SSH 与无剪贴板工具的最小化环境(终端不支持该序列时静默无效)。
+/// Copy text using pbcopy (macOS), xclip (X11), or wl-copy (Wayland), in order.
+/// Fall back to OSC 52 for terminal-managed copying on Windows, SSH, and minimal
+/// environments; unsupported terminals silently ignore the sequence.
 fn copy_to_clipboard(text: &str) -> Result<()> {
     use std::io::Write as _;
     use std::process::{Command, Stdio};
@@ -326,7 +326,7 @@ fn copy_to_clipboard(text: &str) -> Result<()> {
     osc52_copy(text)
 }
 
-/// 通过 OSC 52 序列请求终端写入剪贴板。
+/// Request terminal-managed clipboard copying through OSC 52.
 fn osc52_copy(text: &str) -> Result<()> {
     use std::io::Write as _;
     let mut out = std::io::stdout();
@@ -335,7 +335,7 @@ fn osc52_copy(text: &str) -> Result<()> {
     Ok(())
 }
 
-/// 标准 base64 编码(仅编码一个用途,不值得为此引入依赖)。
+/// Standard base64 encoding for the sole OSC 52 use case, avoiding an extra dependency.
 fn base64(data: &[u8]) -> String {
     const TABLE: &[u8; 64] = b"ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/";
     let mut out = String::with_capacity(data.len().div_ceil(3) * 4);
@@ -358,11 +358,11 @@ fn base64(data: &[u8]) -> String {
     out
 }
 
-/// 写盘当前文件;成功返回 true。
+/// Write the current file; return true on success.
 ///
-/// 冲突块必须全部解决;未处理的非冲突改动会在写盘前**自动应用**,
-/// 与 git 自动合并的语义一致(想拒绝某处改动,写盘前用 x 显式忽略)。
-/// 否则按 base 写盘会悄悄丢掉 git 已合并进来的对侧改动。
+/// All conflicts must be resolved. Pending non-conflicts are **automatically applied**
+/// before writing, matching Git's automatic merge; reject changes explicitly with x.
+/// Writing base instead would silently discard changes Git already merged.
 fn write_current(
     session: &mut Session,
     write_file: &mut dyn FnMut(&FileEntry) -> Result<()>,
@@ -392,15 +392,15 @@ fn write_current(
     Ok(true)
 }
 
-/// 配置文件指定的编辑器(`[ui] editor`;进程内 init 一次)。
+/// Configured editor (`[ui] editor`), initialized once per process.
 static CONFIG_EDITOR: std::sync::OnceLock<Option<String>> = std::sync::OnceLock::new();
 
-/// 应用配置的编辑器设定(进程内仅首次调用生效,应在进 TUI 前调用)。
+/// Apply the editor setting before entering the TUI; only the first call takes effect.
 pub(crate) fn init_editor(editor: Option<String>) {
     let _ = CONFIG_EDITOR.set(editor);
 }
 
-/// 调起编辑器编辑一段内容;返回 None 表示用户取消(编辑器非零退出)。
+/// Edit content in an external editor; None means cancellation (nonzero editor exit).
 fn edit_lines(terminal: &mut DefaultTerminal, initial: &[String]) -> Result<Option<Vec<String>>> {
     let editor = resolve_editor();
     let mut parts = editor.split_whitespace();
@@ -410,7 +410,7 @@ fn edit_lines(terminal: &mut DefaultTerminal, initial: &[String]) -> Result<Opti
     let path = std::env::temp_dir().join(format!("git-pincer-edit-{}.txt", std::process::id()));
     std::fs::write(&path, initial.join("\n"))?;
 
-    // 让出终端给编辑器,结束后重建 TUI
+    // Yield the terminal to the editor, then rebuild the TUI.
     ratatui::restore();
     let status = std::process::Command::new(&program)
         .args(&args)
@@ -425,7 +425,7 @@ fn edit_lines(terminal: &mut DefaultTerminal, initial: &[String]) -> Result<Opti
     }
     let text = std::fs::read_to_string(&path)?;
     let _ = std::fs::remove_file(&path);
-    // 编辑器通常会补一个末尾换行,这里剥掉以免多出空行
+    // Strip the trailing newline editors usually add to avoid an extra empty line.
     let text = text.strip_suffix('\n').unwrap_or(&text);
     Ok(Some(if text.is_empty() {
         Vec::new()
@@ -434,9 +434,9 @@ fn edit_lines(terminal: &mut DefaultTerminal, initial: &[String]) -> Result<Opti
     }))
 }
 
-/// 依优先级选择编辑器:配置 `[ui].editor` > `$VISUAL` > `$EDITOR` >
-/// 平台缺省;空值视同未设置。Unix 缺省在 PATH 上依次探测 vim、vi
-/// (都不存在时仍回退 vi,让启动失败给出可读错误),Windows 用 notepad。
+/// Editor precedence: configured `[ui].editor` > `$VISUAL` > `$EDITOR` > platform default.
+/// Empty values count as unset. Unix checks PATH for vim, then vi, falling back to vi
+/// even if absent so startup reports a readable error. Windows defaults to notepad.
 fn resolve_editor() -> String {
     let config = CONFIG_EDITOR.get().and_then(|e| e.as_deref());
     let visual = std::env::var("VISUAL").ok();
@@ -444,7 +444,7 @@ fn resolve_editor() -> String {
     pick_editor(config, visual.as_deref(), editor.as_deref(), on_path)
 }
 
-/// 编辑器选择的纯逻辑部分(便于测试)。
+/// Pure, testable editor-selection logic.
 fn pick_editor(
     config: Option<&str>,
     visual: Option<&str>,
@@ -473,7 +473,7 @@ fn pick_editor(
     "vi".to_owned()
 }
 
-/// 探测某个可执行文件是否存在于 PATH。
+/// Check whether an executable exists on PATH.
 fn on_path(program: &str) -> bool {
     let Some(paths) = std::env::var_os("PATH") else {
         return false;
@@ -486,7 +486,7 @@ mod tests {
     use super::*;
     use crate::app::FileMerge;
 
-    /// 编辑器选择优先级:配置 > VISUAL > EDITOR > vim > vi;空值视同未设置
+    /// Editor precedence: configuration > VISUAL > EDITOR > vim > vi; empty values are unset.
     #[test]
     #[cfg(not(windows))]
     fn editor_priority_chain() {
@@ -494,7 +494,7 @@ mod tests {
         let none = |_: &str| false;
         let only_vi = |p: &str| p == "vi";
 
-        // 配置最优先;空白配置视同未设置
+        // Configuration takes precedence; whitespace-only settings are unset.
         assert_eq!(
             pick_editor(Some("code --wait"), Some("nvim"), Some("nano"), both),
             "code --wait"
@@ -503,16 +503,16 @@ mod tests {
             pick_editor(Some("  "), Some("nvim"), Some("nano"), both),
             "nvim"
         );
-        // VISUAL 优先于 EDITOR
+        // VISUAL takes precedence over EDITOR.
         assert_eq!(pick_editor(None, Some("nvim"), Some("nano"), both), "nvim");
         assert_eq!(pick_editor(None, None, Some("nano"), both), "nano");
-        // 全部未设置:PATH 上 vim 优先,退化到 vi;都没有仍回退 vi
+        // With no settings, prefer vim on PATH, then vi; use vi even if neither exists.
         assert_eq!(pick_editor(None, None, None, both), "vim");
         assert_eq!(pick_editor(None, None, None, only_vi), "vi");
         assert_eq!(pick_editor(None, None, None, none), "vi");
     }
 
-    /// base64 编码与标准向量一致(OSC 52 载荷用)
+    /// Base64 encoding matches standard test vectors for OSC 52 payloads.
     #[test]
     fn base64_matches_known_vectors() {
         for (input, expected) in [
@@ -524,12 +524,12 @@ mod tests {
             ("hello", "aGVsbG8="),
             ("多字节✓", "5aSa5a2X6IqC4pyT"),
         ] {
-            assert_eq!(base64(input.as_bytes()), expected, "输入: {input:?}");
+            assert_eq!(base64(input.as_bytes()), expected, "input: {input:?}");
         }
     }
 
-    /// 回归:写盘时未处理的非冲突改动应自动应用,而非退回 base
-    /// (否则会悄悄丢掉 git 已自动合并进来的对侧改动)
+    /// Regression: writing applies pending non-conflicts instead of reverting to base,
+    /// which would silently discard changes Git already merged.
     #[test]
     fn write_auto_applies_pending_nonconflict_changes() {
         let merge = FileMerge::from_three_way(
@@ -539,7 +539,7 @@ mod tests {
             "a\nY\nc\nD\n",
         );
         let mut session = Session::new(vec![FileEntry::Text(merge)], "merge".to_owned());
-        // 只解决冲突块(取本地、忽略远端),theirs 侧 d→D 的改动保持未处理
+        // Resolve only the conflict (take local, ignore remote), leaving theirs' d -> D pending.
         let FileEntry::Text(m) = session.current_file_mut() else {
             unreachable!()
         };

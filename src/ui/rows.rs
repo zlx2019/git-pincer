@@ -1,28 +1,28 @@
-//! 渲染行的数据结构与构建:把块序列展开为三栏平行的行,含稳定块折叠与结果栏占位。
+//! Render-row structures and construction: align chunks across three panes, with folding and placeholders.
 
 use crate::app::{FileMerge, SideState};
 use crate::merge::{ChunkKind, MergeChunk};
 
-/// 稳定块折叠阈值与首尾保留行数(与 Web 版一致)。
+/// Stable-region folding threshold and retained context lines, matching the web version.
 pub(crate) const FOLD_THRESHOLD: usize = 8;
 pub(crate) const FOLD_KEEP: usize = 3;
 
-/// 块的改动类型,决定色带颜色(IDEA 语义:蓝=修改、绿=新增、灰=删除、红=冲突)。
+/// Change type controlling band colors: blue=modified, green=added, gray=deleted, red=conflict.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub(crate) enum ChangeType {
-    /// 双方均未改动
+    /// Neither side changed
     None,
-    /// 修改已有行
+    /// Existing lines modified
     Modified,
-    /// 新增行(base 无此区间)
+    /// Lines added (absent from base)
     Added,
-    /// 删除行(改动侧为空)
+    /// Lines deleted (the changed side is empty)
     Deleted,
-    /// 双方改动冲突
+    /// Conflicting changes from both sides
     Conflict,
 }
 
-/// 由块类型与两侧内容推断改动类型;agree 块按其改动性质归类(非冲突的普通改动)。
+/// Infer change type from chunk kind and content; classify agreement as a regular non-conflict change.
 fn change_type(chunk: &MergeChunk) -> ChangeType {
     let of = |side: &[String]| {
         if chunk.base.is_empty() {
@@ -42,54 +42,54 @@ fn change_type(chunk: &MergeChunk) -> ChangeType {
     }
 }
 
-/// 一栏中的一个单元。
+/// One cell in a pane.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub(crate) enum Cell {
-    /// 正常内容行
+    /// Regular content line
     Line {
-        /// 该栏内的绝对行号(1-based)
+        /// Absolute line number in this pane (1-based)
         no: usize,
-        /// 块内行偏移(词级强调寻址用)
+        /// Line offset within the chunk for word emphasis lookup
         offset: usize,
-        /// 行文本(不含换行)
+        /// Line text without its newline
         text: String,
     },
-    /// 该栏在此行无内容(块内两侧行数不齐)
+    /// No content in this pane's row because chunk sides have unequal lengths
     Empty,
-    /// 结果栏的「待解决」占位(未解决的冲突块)
+    /// Result-pane placeholder for an unresolved conflict chunk
     Placeholder,
 }
 
-/// 一个渲染行:三栏各自的单元,或跨三栏的折叠提示。
+/// One render row: a cell per pane, or a folding notice spanning all panes.
 ///
-/// 不含「是否为光标所在块」:该状态随纯导航键高频变化,由渲染层
-/// 用 `chunk` 与光标现比,行列表本身才能按 revision 缓存。
+/// Cursor selection is computed during rendering by comparing `chunk` with the
+/// cursor, allowing rows to be cached by revision across frequent navigation changes.
 #[derive(Debug)]
 pub(crate) struct Row {
-    /// 所属块下标(词级强调寻址 / 光标块判定用)
+    /// Owning chunk index for emphasis lookup and cursor selection
     pub(crate) chunk: usize,
-    /// 块的改动类型(色带 / gutter 配色用)
+    /// Chunk change type for band and gutter colors
     pub(crate) change: ChangeType,
     pub(crate) resolved: bool,
-    /// 折叠行:记录被折叠的行数,展示文案由渲染层生成
+    /// Folded row count; the rendering layer generates the display text
     pub(crate) fold: Option<usize>,
-    /// 本地侧处理状态;None 表示该块本地侧无改动
+    /// Local resolution state; None means no local change in this chunk
     pub(crate) ours_state: Option<SideState>,
-    /// 远端侧处理状态;None 表示该块远端侧无改动
+    /// Remote resolution state; None means no remote change in this chunk
     pub(crate) theirs_state: Option<SideState>,
     pub(crate) ours: Cell,
     pub(crate) result: Cell,
     pub(crate) theirs: Cell,
 }
 
-/// 按 (文件, revision, 折叠开关) 缓存的渲染行。
+/// Render rows cached by (file, revision, folding state).
 ///
-/// 展开行列表要为全文件逐行克隆字符串,代价 O(文件行数);缓存后
-/// 纯导航按键(j/k/n/p/Tab 后回切)与滚动完全零重建,只有真正改动
-/// 合并内容(revision 自增)或切换折叠时才重算。
+/// Expanding rows clones strings across the file in O(line count). Caching avoids
+/// rebuilds during navigation and scrolling; only content revisions and folding
+/// changes trigger recomputation.
 #[derive(Debug, Default)]
 pub(crate) struct RowCache {
-    /// 缓存键:(文件下标, 状态修订号, 是否折叠)
+    /// Cache key: (file index, state revision, folding state)
     key: Option<(usize, u64, bool)>,
     rows: Vec<Row>,
     chunk_starts: Vec<usize>,
@@ -97,7 +97,7 @@ pub(crate) struct RowCache {
 }
 
 impl RowCache {
-    /// 取渲染行(命中直接复用):返回 (行列表, 各块首行下标, 全文最大行号)。
+    /// Get cached rows, returning (rows, first row index per chunk, maximum file line number).
     pub(crate) fn get(
         &mut self,
         file_idx: usize,
@@ -108,7 +108,7 @@ impl RowCache {
         let key = (file_idx, rev, folded);
         if self.key != Some(key) {
             let (rows, starts) = build_rows(merge, folded);
-            // 行号列宽按全文最大行号计算,滚动时保持稳定
+            // Use the maximum file line number to keep the number column stable while scrolling.
             self.max_no = rows
                 .iter()
                 .flat_map(|r| [&r.ours, &r.result, &r.theirs])
@@ -126,7 +126,7 @@ impl RowCache {
     }
 }
 
-/// 把文件的块序列展开为渲染行,并返回每块首行的行下标(滚动定位用)。
+/// Expand file chunks into render rows and return each chunk's first row index for scrolling.
 pub(crate) fn build_rows(merge: &FileMerge, folded: bool) -> (Vec<Row>, Vec<usize>) {
     let mut rows: Vec<Row> = Vec::new();
     let mut chunk_starts: Vec<usize> = Vec::new();
@@ -137,7 +137,7 @@ pub(crate) fn build_rows(merge: &FileMerge, folded: bool) -> (Vec<Row>, Vec<usiz
         let resolved = merge.chunk_resolved(idx);
         let change = change_type(chunk);
         let result_lines = merge.current_content(idx);
-        // 各侧处理状态(gutter 符号用);单侧块只有对应一侧
+        // Side states for gutter symbols; single-side chunks only expose that side.
         let st = &merge.states[idx];
         let (ours_state, theirs_state) = match chunk.kind {
             ChunkKind::Ours => (Some(st.ours), None),
@@ -152,10 +152,10 @@ pub(crate) fn build_rows(merge: &FileMerge, folded: bool) -> (Vec<Row>, Vec<usiz
             .max(result_lines.len())
             .max(chunk.theirs_lines().len())
             .max(1);
-        // 未解决的冲突块:结果栏不展示 base,改为居中一行「待解决」占位
+        // Unresolved conflicts show a centered pending placeholder instead of base in the result pane.
         let placeholder_at = (chunk.kind == ChunkKind::Conflict && !resolved).then_some(height / 2);
 
-        // 生成一段三栏平行行;i 为块内偏移
+        // Generate aligned rows across all panes; i is the offset within the chunk.
         let push_slice = |rows: &mut Vec<Row>, range: std::ops::Range<usize>| {
             for i in range {
                 let cell = |lines: &[String], start: usize| match lines.get(i) {
@@ -212,13 +212,13 @@ mod tests {
     use super::*;
     use crate::app::Side;
 
-    /// 折叠行与行号构建正确
+    /// Folded rows and line numbers are constructed correctly.
     #[test]
     fn build_rows_folds_long_stable_chunks() {
         let base: String = (1..=20).map(|i| format!("line{i}\n")).collect();
         let merge = FileMerge::from_three_way("demo.txt".to_owned(), &base, &base, &base);
         let (rows, starts) = build_rows(&merge, true);
-        // 20 行稳定区折叠为 3 + 折叠行 + 3
+        // Fold 20 stable lines into 3 context lines + a fold row + 3 context lines.
         assert_eq!(rows.len(), 7);
         assert_eq!(rows[3].fold, Some(14));
         assert_eq!(starts, vec![0]);
@@ -227,7 +227,7 @@ mod tests {
         assert_eq!(unfolded.len(), 20);
     }
 
-    /// 改动类型推断:新增 / 删除 / 修改 / 冲突(IDEA 四色语义)
+    /// Infer added / deleted / modified / conflicting changes using IDEA color semantics.
     #[test]
     fn change_type_maps_idea_semantics() {
         let v = |s: &[&str]| s.iter().map(|t| (*t).to_owned()).collect::<Vec<_>>();
@@ -241,24 +241,24 @@ mod tests {
             ours_start: 1,
             theirs_start: 1,
         };
-        // 单侧新增(base 为空)
+        // Single-side addition (empty base).
         let c = mk(ChunkKind::Ours, &[], &["new"], &[]);
         assert_eq!(change_type(&c), ChangeType::Added);
-        // 单侧删除(改动侧为空)
+        // Single-side deletion (empty changed side).
         let c = mk(ChunkKind::Theirs, &["old"], &["old"], &[]);
         assert_eq!(change_type(&c), ChangeType::Deleted);
-        // 单侧修改
+        // Single-side modification.
         let c = mk(ChunkKind::Ours, &["a"], &["b"], &["a"]);
         assert_eq!(change_type(&c), ChangeType::Modified);
-        // 冲突恒为冲突
+        // Conflicts always remain conflicts.
         let c = mk(ChunkKind::Conflict, &[], &["x"], &["y"]);
         assert_eq!(change_type(&c), ChangeType::Conflict);
-        // 双方一致按改动性质归类
+        // Classify agreement by the nature of the change.
         let c = mk(ChunkKind::Agree, &[], &["n"], &["n"]);
         assert_eq!(change_type(&c), ChangeType::Added);
     }
 
-    /// 行缓存:同键命中复用,revision / folded 变化后重建
+    /// Reuse rows for matching cache keys; rebuild when revision or folded changes.
     #[test]
     fn row_cache_hits_and_invalidates() {
         let base: String = (1..=20).map(|i| format!("line{i}\n")).collect();
@@ -267,15 +267,15 @@ mod tests {
         let mut cache = RowCache::default();
 
         let ptr = cache.get(0, &merge, 0, true).0.as_ptr();
-        // 同键再取:零重建(切片地址不变)
+        // Reusing the same key does not rebuild (the slice address stays unchanged).
         assert_eq!(cache.get(0, &merge, 0, true).0.as_ptr(), ptr);
 
-        // folded 变化 → 重建,行数不同(20 行稳定区展开)
+        // Changing folded rebuilds rows and expands the 20-line stable region.
         let folded_len = cache.get(0, &merge, 0, true).0.len();
         let unfolded_len = cache.get(0, &merge, 0, false).0.len();
         assert!(unfolded_len > folded_len);
 
-        // revision 变化 → 重建,内容反映最新取用
+        // Changing revision rebuilds rows to reflect the latest taken content.
         merge.apply(Side::Theirs);
         let (rows, _, _) = cache.get(0, &merge, 1, false);
         assert!(rows.iter().any(|r| matches!(
@@ -284,7 +284,7 @@ mod tests {
         )));
     }
 
-    /// 未解决冲突块的结果栏为占位;解决后恢复为内容行
+    /// Unresolved result chunks show placeholders, replaced by content after resolution.
     #[test]
     fn result_shows_placeholder_until_conflict_resolved() {
         let mut merge =
@@ -292,7 +292,7 @@ mod tests {
         let (rows, _) = build_rows(&merge, false);
         assert!(rows.iter().any(|r| r.result == Cell::Placeholder));
 
-        // 取本地、忽略远端 → 冲突解决,占位消失且结果为取用内容
+        // Taking local and ignoring remote resolves the conflict and replaces the placeholder.
         merge.apply(Side::Ours);
         merge.ignore(Side::Theirs);
         let (rows, _) = build_rows(&merge, false);

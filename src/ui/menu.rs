@@ -1,8 +1,8 @@
-//! 通用单选列表浮层:主操作菜单与分支 / 提交选择器共用。
+//! Shared single-choice list overlays for the action menu and branch / commit pickers.
 //!
-//! [`MenuSession`] 把多级菜单与弹框收进同一次 ratatui 会话:
-//! 页面切换只清屏重绘,不退出 alternate screen,避免闪屏;
-//! 会话 Drop 时恢复终端,与随后的 git 透传输出、冲突解决界面顺序衔接。
+//! [`MenuSession`] keeps nested menus and dialogs in one ratatui session.
+//! Page changes clear and redraw without leaving the alternate screen, avoiding flicker.
+//! Dropping the session restores the terminal before subsequent Git output or resolution.
 
 use std::io::IsTerminal;
 
@@ -23,23 +23,23 @@ use crate::i18n::{tr, tr_f};
 
 use super::theme::{Theme, term_color};
 
-/// 主菜单 logo 字符画,编译期嵌入。
+/// Main menu logo art, embedded at compile time.
 ///
-/// 两种内容都支持:带 ANSI 颜色序列的真彩像素画(保留原色),
-/// 或纯文本字符画(渲染时统一着主题 logo 色)。
+/// Supports ANSI true-color pixel art with preserved colors, or plain text art
+/// tinted with the theme's logo color during rendering.
 const LOGO_ANSI: &str = include_str!("logo.ans");
 
-/// 解析并缓存 logo(进程内只解析一次;颜色经 term_color 适配终端能力)。
+/// Parse and cache the logo once per process, adapting colors through term_color.
 fn logo_art() -> &'static [Line<'static>] {
     static ART: OnceLock<Vec<Line<'static>>> = OnceLock::new();
     ART.get_or_init(|| parse_ansi_art(LOGO_ANSI))
 }
 
-/// 解析 ANSI 字符画为 ratatui 行序列。
+/// Parse ANSI art into ratatui lines.
 ///
-/// 只支持 logo 用到的 SGR 子集:`0` 重置、`38;2;r;g;b` 前景、
-/// `48;2;r;g;b` 背景;无样式的空格视为透明格。
-/// 首尾的全空行会被裁剪。
+/// Supports the logo's SGR subset: `0` reset, `38;2;r;g;b` foreground,
+/// and `48;2;r;g;b` background. Unstyled spaces are transparent.
+/// Leading and trailing empty rows are trimmed.
 fn parse_ansi_art(src: &str) -> Vec<Line<'static>> {
     let mut lines: Vec<(Line<'static>, bool)> = Vec::new();
     for raw in src.lines() {
@@ -49,7 +49,7 @@ fn parse_ansi_art(src: &str) -> Vec<Line<'static>> {
         let mut chars = raw.chars();
         while let Some(c) = chars.next() {
             if c == '\x1b' {
-                // 收集 `[` 与 `m` 之间的参数段
+                // Collect parameters between `[` and `m`.
                 let mut params = String::new();
                 for pc in chars.by_ref() {
                     match pc {
@@ -67,7 +67,7 @@ fn parse_ansi_art(src: &str) -> Vec<Line<'static>> {
                 if let Some(b) = bg {
                     style = style.patch(b);
                 }
-                // 带颜色或非空白的字符都算可见;纯文本字符画因此不会被裁剪
+                // Colored or non-whitespace characters are visible, preserving plain text art.
                 if fg.is_some() || bg.is_some() || !c.is_whitespace() {
                     visible = true;
                 }
@@ -76,7 +76,7 @@ fn parse_ansi_art(src: &str) -> Vec<Line<'static>> {
         }
         lines.push((Line::from(spans), visible));
     }
-    // 裁掉首尾无可见像素的行
+    // Trim leading and trailing rows with no visible pixels.
     while lines.last().is_some_and(|(_, v)| !v) {
         lines.pop();
     }
@@ -85,7 +85,7 @@ fn parse_ansi_art(src: &str) -> Vec<Line<'static>> {
     lines.into_iter().map(|(l, _)| l).collect()
 }
 
-/// 应用一段 SGR 参数到当前前景 / 背景状态。
+/// Apply SGR parameters to the current foreground and background state.
 fn apply_sgr(params: &str, fg: &mut Option<Style>, bg: &mut Option<Style>) {
     let nums: Vec<u16> = params
         .split(';')
@@ -114,19 +114,19 @@ fn apply_sgr(params: &str, fg: &mut Option<Style>, bg: &mut Option<Style>) {
     }
 }
 
-/// 菜单条目:标签(命令 / 分支 / 短 hash)+ 可选描述,渲染时分色两列。
+/// Menu entry: a command / branch / short-hash label and optional description in two colored columns.
 #[derive(Debug, Clone)]
 pub(crate) struct MenuItem {
-    /// 左列标签(选择结果以此为准)
+    /// Left-column label used as the selected value
     pub(crate) label: String,
-    /// 右列描述;为空时只渲染标签
+    /// Right-column description; empty to display only the label
     pub(crate) desc: String,
-    /// 主菜单底部说明窗的长描述;为空时回退到 desc
+    /// Extended description in the main menu's bottom panel; falls back to desc when empty
     pub(crate) hint: String,
 }
 
 impl MenuItem {
-    /// 构造条目。
+    /// Construct an entry.
     pub(crate) fn new(label: impl Into<String>, desc: impl Into<String>) -> Self {
         Self {
             label: label.into(),
@@ -135,14 +135,14 @@ impl MenuItem {
         }
     }
 
-    /// 附加说明窗长描述。
+    /// Attach an extended description for the information panel.
     pub(crate) fn with_hint(mut self, hint: impl Into<String>) -> Self {
         self.hint = hint.into();
         self
     }
 }
 
-/// 估算终端显示宽度(CJK 记 2 列;箭头 / 制表 / 块元素 / 几何符号记 1 列)。
+/// Estimate display width: CJK uses two columns; arrows, box drawing, blocks, and shapes use one.
 fn display_width(s: &str) -> usize {
     s.chars()
         .map(|c| {
@@ -155,25 +155,25 @@ fn display_width(s: &str) -> usize {
         .sum()
 }
 
-/// 光标回绕移动:`delta` 为 +1 / -1。
+/// Move the cursor with wrapping; `delta` is +1 / -1.
 fn wrap_move(cursor: usize, len: usize, delta: isize) -> usize {
     (cursor as isize + delta).rem_euclid(len as isize) as usize
 }
 
-/// 一次连续的菜单 TUI 会话:多级选择页与弹框共享同一终端现场。
+/// One continuous menu TUI session sharing a terminal across nested pickers and dialogs.
 ///
-/// 页面切换只清屏重绘,不反复进出 alternate screen,避免闪屏;
-/// Drop 时恢复终端。转入冲突解决界面时用 [`Self::into_terminal`]
-/// 移交终端所有权,同样保持现场不闪屏。
+/// Page changes redraw without repeatedly entering and leaving the alternate screen.
+/// Drop restores the terminal. [`Self::into_terminal`] transfers ownership to the
+/// conflict resolver while preserving the screen without flicker.
 pub(crate) struct MenuSession {
-    /// 会话持有的终端;None 表示所有权已移交,Drop 不再恢复
+    /// Owned terminal; None after transfer, disabling restoration on Drop
     terminal: Option<ratatui::DefaultTerminal>,
-    /// 界面主题
+    /// UI theme
     theme: Theme,
 }
 
 impl MenuSession {
-    /// 打开菜单会话(进入 TUI);非交互终端直接报错。
+    /// Open a menu TUI session; reject non-interactive terminals.
     pub(crate) fn open(light: bool) -> Result<Self> {
         if !std::io::stdout().is_terminal() {
             anyhow::bail!("{}", tr("common.need_tty_menu"));
@@ -184,18 +184,18 @@ impl MenuSession {
         })
     }
 
-    /// 移交终端所有权(转入冲突解决界面时复用现场,避免退出
-    /// alternate screen 造成的闪屏);此后 Drop 不再恢复终端,
-    /// 恢复责任转移给接收方。
+    /// Transfer terminal ownership to the resolver without leaving the alternate screen.
+    /// Drop will no longer restore the terminal; the recipient assumes that
+    /// responsibility.
     pub(crate) fn into_terminal(mut self) -> Result<ratatui::DefaultTerminal> {
         self.terminal
             .take()
             .ok_or_else(|| anyhow::anyhow!("menu session already handed over the terminal"))
     }
 
-    /// 运行单选列表页;返回选中项下标,None 表示取消(q / Esc)或列表为空。
-    /// `vitals` 为 Some 时渲染完整 RPG 主菜单页(字标 + 状态窗 + 说明窗),
-    /// 否则渲染普通双线框列表;`initial` 为光标初始位置。
+    /// Run a picker and return the selected index, or None for cancellation or an empty list.
+    /// With `vitals`, draw the full RPG menu with logo, stats, and description;
+    /// otherwise draw a double-bordered list. `initial` sets the starting cursor.
     pub(crate) fn pick(
         &mut self,
         title: &str,
@@ -209,12 +209,12 @@ impl MenuSession {
         let Some(terminal) = self.terminal.as_mut() else {
             anyhow::bail!("menu session already handed over the terminal");
         };
-        // 清屏强制全量重绘,抹掉上一页的残留(各页面板尺寸不同)
+        // Force a full redraw to remove remnants from differently sized previous panels.
         terminal.clear()?;
         pick_loop(terminal, title, items, vitals, initial, &self.theme)
     }
 
-    /// 展示消息弹框(如失败原因),任意键关闭。
+    /// Show a message dialog, such as a failure reason; any key closes it.
     pub(crate) fn notice(&mut self, title: &str, body: &str) -> Result<()> {
         let Some(terminal) = self.terminal.as_mut() else {
             anyhow::bail!("menu session already handed over the terminal");
@@ -223,8 +223,8 @@ impl MenuSession {
         notice_loop(terminal, title, body, &self.theme)
     }
 
-    /// 绘制一帧「命令执行中」等待页后立即返回(不等待按键),
-    /// 供随后的阻塞操作(如需要网络的 git 命令)期间维持画面反馈。
+    /// Draw one running-page frame and return immediately without waiting for input,
+    /// providing feedback during subsequent blocking operations such as network Git commands.
     pub(crate) fn flash(&mut self, cmd_line: &str) -> Result<()> {
         let Some(terminal) = self.terminal.as_mut() else {
             anyhow::bail!("menu session already handed over the terminal");
@@ -244,7 +244,7 @@ impl Drop for MenuSession {
     }
 }
 
-/// 选择器事件循环:绘制 → 读键 → 移动 / 确认 / 取消。
+/// Picker event loop: draw, read a key, then move / confirm / cancel.
 fn pick_loop(
     terminal: &mut ratatui::DefaultTerminal,
     title: &str,
@@ -254,7 +254,7 @@ fn pick_loop(
     theme: &Theme,
 ) -> Result<Option<usize>> {
     let mut cursor = initial.min(items.len() - 1);
-    // ListState 跨帧保留滚动偏移,选中项始终保持在视口内
+    // ListState preserves scroll offsets across frames, keeping the selection visible.
     let mut list = ListState::default();
     loop {
         list.select(Some(cursor));
@@ -273,7 +273,7 @@ fn pick_loop(
             KeyCode::Char('k') | KeyCode::Up => cursor = wrap_move(cursor, items.len(), -1),
             KeyCode::Enter => return Ok(Some(cursor)),
             KeyCode::Char('q') | KeyCode::Esc => return Ok(None),
-            // Ctrl+C 遵循终端惯例,等价于取消(raw mode 下不产生 SIGINT)
+            // Ctrl+C cancels as expected; raw mode does not generate SIGINT.
             KeyCode::Char('c') if key.modifiers.contains(event::KeyModifiers::CONTROL) => {
                 return Ok(None);
             }
@@ -282,11 +282,11 @@ fn pick_loop(
     }
 }
 
-/// 状态条的总格数。
+/// Total cells in a status gauge.
 const GAUGE_CELLS: usize = 10;
 
-/// 绘制二级选择列表:双线窗框 + 嵌入标题 + 选中行橙底反色,
-/// 与主菜单同一套 RPG 视觉;长列表由 [`ListState`] 滚动。
+/// Draw a target picker with double borders, an embedded title, and orange selection,
+/// matching the RPG menu. [`ListState`] handles scrolling for long lists.
 fn draw_pick(
     frame: &mut Frame,
     title: &str,
@@ -295,7 +295,7 @@ fn draw_pick(
     theme: &Theme,
 ) {
     let area = frame.area();
-    // 标签列宽对齐到最长标签;面板宽度按内容自适应,不超出屏幕
+    // Align labels to the longest entry and fit panel width to content within the screen.
     let label_w = items
         .iter()
         .map(|i| display_width(&i.label))
@@ -309,7 +309,7 @@ fn draw_pick(
         })
         .max()
         .unwrap_or(0);
-    // 边框 2 + 左右内边距 4 + 选中符号 2 + 余量 2
+    // Borders 2 + horizontal padding 4 + selection marker 2 + margin 2.
     let width = panel_width(content_w + 10, false, area);
     let panel_h = (items.len() as u16 + 2)
         .min(area.height.saturating_sub(3))
@@ -357,8 +357,8 @@ fn draw_pick(
     frame.render_stateful_widget(list, panel, list_state);
 }
 
-/// 绘制 RPG 风格主菜单页:PINCER 字标、分隔线、状态窗、指令窗、
-/// 说明窗与按键提示;高度不足时按「字标 → 状态窗 → 说明窗」顺序降级。
+/// Draw the RPG menu: PINCER logo, divider, stats, commands, description, and key hints.
+/// As height shrinks, hide the logo, then stats, then description.
 fn draw_rpg_menu(
     frame: &mut Frame,
     items: &[MenuItem],
@@ -372,7 +372,7 @@ fn draw_rpg_menu(
     }
     let width = 48u16.min(area.width.saturating_sub(4));
     let menu_h = items.len() as u16 + 2;
-    // 各段高度:指令窗与按键行常驻,其余按剩余空间取舍(面板间各空 1 行)
+    // Always retain commands and key hints; fit other sections with one row between panels.
     let total = |logo: bool, status: bool, hint: bool| -> u16 {
         menu_h
             + 2
@@ -393,7 +393,7 @@ fn draw_rpg_menu(
         show_hint = false;
     }
     let mut need = total(show_logo, show_status, show_hint);
-    // 高度富余时,字标与分隔线前后各留一行呼吸空隙
+    // Add a row around the logo and divider when height permits.
     let breathe = u16::from(show_logo && area.height >= need + 2);
     need += breathe * 2;
 
@@ -536,7 +536,7 @@ fn draw_rpg_menu(
     );
 }
 
-/// 状态窗四行:分支 / HP(工作区改动)/ MP(贮藏)/ EXP(待推送)。
+/// Four status rows: branch / HP (worktree changes) / MP (stashes) / EXP (commits ahead).
 fn status_rows(vitals: &RepoVitals, inner: usize, theme: &Theme) -> Vec<Line<'static>> {
     let dim = Style::new().fg(theme.fg_dim);
     let hp = GAUGE_CELLS - vitals.changes.min(GAUGE_CELLS);
@@ -547,7 +547,7 @@ fn status_rows(vitals: &RepoVitals, inner: usize, theme: &Theme) -> Vec<Line<'st
         Some(0) => tr("menu.synced").to_owned(),
         Some(n) => tr_f("menu.ahead", &[("n", &n.to_string())]),
     };
-    // 标签列对齐:分支标签可能比 HP/MP/EXP 宽(如英文 Branch)
+    // Align labels; the branch label may be wider than HP / MP / EXP.
     let branch_label = tr("menu.branch");
     let label_w = display_width(branch_label).max(3) + 1;
     let pad = |label: &str| format!("{label}{}", " ".repeat(label_w - display_width(label)));
@@ -592,7 +592,7 @@ fn status_rows(vitals: &RepoVitals, inner: usize, theme: &Theme) -> Vec<Line<'st
     ]
 }
 
-/// 标签 + 十格状态条(已填充格 + 空槽格)。
+/// Label and ten-cell gauge with filled and empty slots.
 fn gauge_spans(
     label: &str,
     filled: usize,
@@ -609,7 +609,7 @@ fn gauge_spans(
     ]
 }
 
-/// 面板内两端对齐的一行:左右两组 spans 之间以空隙撑开。
+/// Justify a panel row by adding space between the left and right span groups.
 fn spread_line(left: Vec<Span<'static>>, right: Vec<Span<'static>>, inner: usize) -> Line<'static> {
     let used: usize = left
         .iter()
@@ -622,7 +622,7 @@ fn spread_line(left: Vec<Span<'static>>, right: Vec<Span<'static>>, inner: usize
     Line::from(spans)
 }
 
-/// 选中行的光标符号(橙色,闪烁)或等宽占位。
+/// Orange blinking cursor for a selected row, or an equal-width placeholder.
 fn cursor_span(selected: bool, theme: &Theme) -> Span<'static> {
     if selected {
         Span::styled(
@@ -636,7 +636,7 @@ fn cursor_span(selected: bool, theme: &Theme) -> Span<'static> {
     }
 }
 
-/// 条目标签样式:选中为橙色加粗,未选中为常规蓝。
+/// Entry label style: bold orange when selected, regular blue otherwise.
 fn label_style(selected: bool, theme: &Theme) -> Style {
     if selected {
         Style::new()
@@ -647,7 +647,7 @@ fn label_style(selected: bool, theme: &Theme) -> Style {
     }
 }
 
-/// RPG 双线窗框:米白框线 + 嵌在上框线的标题(空标题则纯框)。
+/// RPG double border in off-white, with a title in the top edge if nonempty.
 fn rpg_block(title: &str, theme: &Theme) -> Block<'static> {
     let mut block = Block::bordered()
         .border_type(BorderType::Double)
@@ -664,7 +664,7 @@ fn rpg_block(title: &str, theme: &Theme) -> Block<'static> {
     block
 }
 
-/// `──── ◆ 文案 ◆ ────` 分隔线,两侧线段等分剩余宽度。
+/// Decorated text divider with the remaining width split equally between side rules.
 fn divider_line(text: &str, width: u16, theme: &Theme) -> Line<'static> {
     let tw = display_width(text) + 2;
     let side = (width as usize).saturating_sub(tw) / 2;
@@ -678,7 +678,7 @@ fn divider_line(text: &str, width: u16, theme: &Theme) -> Line<'static> {
     ])
 }
 
-/// 键帽样式的按键标签。
+/// Keycap-style key label.
 fn keycap(text: &str, theme: &Theme) -> Span<'static> {
     Span::styled(
         text.to_owned(),
@@ -686,7 +686,7 @@ fn keycap(text: &str, theme: &Theme) -> Span<'static> {
     )
 }
 
-/// 计算面板宽度:按内容自适应;带 logo 的页面加宽到与 logo 齐宽,不超出屏幕。
+/// Fit panel width to content and any logo, constrained to the screen.
 fn panel_width(content_w: usize, logo: bool, area: Rect) -> u16 {
     let art_w = logo_art().iter().map(Line::width).max().unwrap_or(0) as u16;
     let fit = content_w as u16;
@@ -698,10 +698,10 @@ fn panel_width(content_w: usize, logo: bool, area: Rect) -> u16 {
     .min(area.width.saturating_sub(4))
 }
 
-/// 垂直居中放置「logo + 面板」组合并绘制 logo,返回面板区域。
+/// Vertically center the logo and panel, draw the logo, and return the panel area.
 ///
-/// logo 画在面板上方,两者作为整体居中;屏幕放不下时自动隐藏 logo。
-/// 逐行内容左缘对齐(整块统一偏移居中),避免行尾透明格差异造成错位。
+/// Place the logo above the panel and center them together; hide the logo if needed.
+/// Align row contents to one shared left edge to avoid shifts from trailing transparent cells.
 fn place_panel(frame: &mut Frame, width: u16, panel_h: u16, logo: bool, theme: &Theme) -> Rect {
     let area = frame.area();
     let art = logo_art();
@@ -728,7 +728,7 @@ fn place_panel(frame: &mut Frame, width: u16, panel_h: u16, logo: bool, theme: &
     }
 }
 
-/// logo 的着色副本:无自带颜色的字符统一着主题 logo 色(纯文本字符画场景)。
+/// Tinted logo copy, applying the theme logo color to characters without embedded colors.
 fn tinted_logo(theme: &Theme) -> Vec<Line<'static>> {
     logo_art()
         .iter()
@@ -750,15 +750,15 @@ fn tinted_logo(theme: &Theme) -> Vec<Line<'static>> {
         .collect()
 }
 
-/// 绘制「命令执行中」等待页:字标 + 双线窗框,命令行高亮展示,
-/// 页面结构与主菜单一致以减小切换跳变。
+/// Draw a running page with logo, double border, and highlighted command,
+/// matching the main menu structure to minimize visual shifts.
 fn draw_flash(frame: &mut Frame, cmd_line: &str, theme: &Theme) {
     let area = frame.area();
     if area.width == 0 || area.height == 0 {
         return;
     }
     let suffix = format!("  {}", tr("menu.running"));
-    // 边框 2 + 左右内边距 4 + 两端余量 2
+    // Borders 2 + horizontal padding 4 + edge margins 2.
     let width = panel_width(
         display_width(cmd_line) + display_width(&suffix) + 8,
         true,
@@ -779,7 +779,7 @@ fn draw_flash(frame: &mut Frame, cmd_line: &str, theme: &Theme) {
     frame.render_widget(Paragraph::new(line).block(rpg_block("", theme)), panel);
 }
 
-/// 弹框事件循环:绘制一次,等待任意按键关闭。
+/// Dialog loop: draw once and wait for any key to close.
 fn notice_loop(
     terminal: &mut ratatui::DefaultTerminal,
     title: &str,
@@ -796,12 +796,12 @@ fn notice_loop(
     }
 }
 
-/// 绘制居中的消息弹框:双线窗框 + 琥珀色嵌入标题 + 自动换行正文。
+/// Draw a centered message dialog with double borders, an amber title, and wrapped text.
 fn draw_notice(frame: &mut Frame, title: &str, body: &str, theme: &Theme) {
     let area = frame.area();
     let width = 64u16.min(area.width.saturating_sub(4)).max(20);
     let inner_w = width.saturating_sub(6) as usize;
-    // 估算换行后的行数以确定弹框高度
+    // Estimate wrapped line count to determine dialog height.
     let lines: usize = body
         .lines()
         .map(|l| display_width(l).div_ceil(inner_w.max(1)).max(1))
@@ -844,15 +844,15 @@ fn draw_notice(frame: &mut Frame, title: &str, body: &str, theme: &Theme) {
 mod tests {
     use super::*;
 
-    /// 光标回绕移动
+    /// Cursor movement wraps at list boundaries.
     #[test]
     fn wrap_move_cycles() {
-        assert_eq!(wrap_move(0, 5, -1), 4); // 顶部上移回绕到底
-        assert_eq!(wrap_move(4, 5, 1), 0); // 底部下移回绕到顶
+        assert_eq!(wrap_move(0, 5, -1), 4); // Moving up from the top wraps to the bottom.
+        assert_eq!(wrap_move(4, 5, 1), 0); // Moving down from the bottom wraps to the top.
         assert_eq!(wrap_move(2, 5, 1), 3);
     }
 
-    /// CJK 显示宽度估算(面板宽度自适应用);块元素 / 几何符号按 1 列
+    /// CJK width estimates for panel sizing; blocks and geometric symbols use one column.
     #[test]
     fn display_width_counts_cjk_as_two() {
         assert_eq!(display_width("pull"), 4);
@@ -863,7 +863,7 @@ mod tests {
         assert_eq!(display_width("↑2 待推送"), 9);
     }
 
-    /// 两端对齐行:空隙撑满内宽,总宽恰为 inner
+    /// Justified rows fill exactly the available inner width.
     #[test]
     fn spread_line_fills_inner_width() {
         let line = spread_line(
@@ -875,7 +875,7 @@ mod tests {
         assert_eq!(total, 30);
     }
 
-    /// 状态条:填充格与空槽格总和恒为 GAUGE_CELLS
+    /// Filled and empty gauge slots always total GAUGE_CELLS.
     #[test]
     fn gauge_spans_total_cells() {
         let theme = Theme::default();
@@ -886,21 +886,24 @@ mod tests {
         }
     }
 
-    /// ANSI 半块像素画解析:颜色状态机、透明格与尾部空行裁剪
+    /// Parse ANSI half-block art: color state, transparent cells, and trailing empty-row trimming.
     #[test]
     fn parses_ansi_half_block_art() {
         let src = "\x1b[0m \x1b[38;2;10;20;30m\x1b[48;2;40;50;60m▀\x1b[0m \n\x1b[0m \x1b[0m ";
         let lines = parse_ansi_art(src);
-        assert_eq!(lines.len(), 1, "尾部全透明行应被裁剪");
+        assert_eq!(lines.len(), 1, "trailing transparent rows must be trimmed");
         let spans = &lines[0].spans;
-        assert_eq!(spans.len(), 3); // 透明格 + 像素 + 透明格
+        assert_eq!(spans.len(), 3); // Transparent cell + pixel + transparent cell.
         assert_eq!(spans[1].content, "▀");
         assert!(spans[1].style.fg.is_some());
         assert!(spans[1].style.bg.is_some());
-        assert!(spans[0].style.fg.is_none(), "透明格应无样式");
+        assert!(
+            spans[0].style.fg.is_none(),
+            "transparent cells must be unstyled"
+        );
     }
 
-    /// 纯文本字符画(无 ANSI 颜色)不应被裁剪
+    /// Plain text art without ANSI colors must not be trimmed away.
     #[test]
     fn plain_text_art_is_not_trimmed() {
         let lines = parse_ansi_art("ABC\n\n");
@@ -908,7 +911,7 @@ mod tests {
         assert_eq!(lines[0].spans.len(), 3);
     }
 
-    /// 把 TestBackend 渲染缓冲拼成纯文本(逐行)。
+    /// Convert the TestBackend render buffer into plain text, row by row.
     fn buffer_text(buf: &ratatui::buffer::Buffer) -> String {
         let area = buf.area();
         let mut text = String::new();
@@ -921,13 +924,14 @@ mod tests {
         text
     }
 
-    /// RPG 主菜单在 80×24 终端下渲染出全部区块
+    /// The RPG menu renders all sections in an 80x24 terminal.
     #[test]
     fn rpg_menu_renders_all_sections() {
         use ratatui::{Terminal, backend::TestBackend};
         let items = vec![
-            MenuItem::new("pull", "拉取远端").with_hint("从远端拉取最新提交,更新当前分支。"),
-            MenuItem::new("merge", "合并分支"),
+            MenuItem::new("pull", "Pull from remote")
+                .with_hint("Fetch the latest commits and update the current branch."),
+            MenuItem::new("merge", "Merge a branch"),
         ];
         let vitals = RepoVitals {
             branch: "main".to_owned(),
@@ -942,23 +946,26 @@ mod tests {
             .unwrap();
         let text = buffer_text(terminal.backend().buffer());
         println!("{text}");
-        // CJK 在缓冲中占两格(续格为空格),匹配前去掉全部空格
+        // Remove layout spaces before matching rendered text.
         let flat = text.replace(' ', "");
-        assert!(flat.contains("◆STATUS"), "状态窗标题缺失");
-        assert!(flat.contains("◆COMMAND"), "指令窗标题缺失");
-        assert!(flat.contains("▶pull"), "选中行光标缺失");
-        assert!(flat.contains("Lv.128"), "等级缺失");
-        assert!(flat.contains("↑2topush"), "待推送计数缺失");
-        assert!(flat.contains("ChooseYourCommand"), "分隔线文案缺失");
-        assert!(flat.contains("从远端拉取最新提交"), "说明窗文案缺失");
-        assert!(flat.contains("Flee"), "按键提示缺失");
+        assert!(flat.contains("◆STATUS"), "status title missing");
+        assert!(flat.contains("◆COMMAND"), "command title missing");
+        assert!(flat.contains("▶pull"), "selection cursor missing");
+        assert!(flat.contains("Lv.128"), "level missing");
+        assert!(flat.contains("↑2topush"), "commits-ahead count missing");
+        assert!(flat.contains("ChooseYourCommand"), "divider text missing");
+        assert!(
+            flat.contains("Fetchthelatestcommits"),
+            "description text missing"
+        );
+        assert!(flat.contains("Flee"), "key hint missing");
     }
 
-    /// 高度不足时按序降级:12 行终端只保留指令窗与按键行
+    /// A 12-row terminal retains only commands and key hints as sections are hidden in order.
     #[test]
     fn rpg_menu_degrades_on_short_terminal() {
         use ratatui::{Terminal, backend::TestBackend};
-        let items = vec![MenuItem::new("pull", "拉取远端")];
+        let items = vec![MenuItem::new("pull", "Pull from remote")];
         let vitals = RepoVitals {
             branch: "main".to_owned(),
             changes: 0,
@@ -971,12 +978,18 @@ mod tests {
             .draw(|f| draw_rpg_menu(f, &items, 0, &vitals, &Theme::default()))
             .unwrap();
         let flat = buffer_text(terminal.backend().buffer()).replace(' ', "");
-        assert!(!flat.contains("◆STATUS"), "矮终端应隐藏状态窗");
-        assert!(flat.contains("◆COMMAND"), "指令窗必须保留");
+        assert!(
+            !flat.contains("◆STATUS"),
+            "short terminals must hide the status panel"
+        );
+        assert!(
+            flat.contains("◆COMMAND"),
+            "command panel must remain visible"
+        );
         assert!(flat.contains("▶pull"));
     }
 
-    /// 内嵌 logo 资产能解析出非空字符画
+    /// The embedded logo asset parses into nonempty art.
     #[test]
     fn embedded_logo_parses() {
         let art = logo_art();

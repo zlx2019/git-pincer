@@ -1,4 +1,4 @@
-//! 界面整体绘制:状态栏、提示条、消息条、帮助浮层与二选一视图。
+//! Overall UI rendering: status, hints, messages, help overlay, and whole-file picks.
 
 use crate::i18n::{tr, tr_f};
 use ratatui::Frame;
@@ -14,10 +14,10 @@ use super::keymap::{Action, key_hint};
 use super::panes::draw_columns;
 use super::theme::Theme;
 
-/// 绘制整个界面(独立成 pub 函数,便于 TestBackend 冒烟测试)。
+/// Draw the entire UI; public for smoke testing with TestBackend.
 ///
-/// 需要可变会话:绘制时会把滚动位置写回当前文件,跨帧保持视口稳定;
-/// 需要可变 UI 状态:高亮缓存按需构建。
+/// The session is mutable to persist scroll positions across frames.
+/// UI state is mutable to build highlighting caches on demand.
 pub fn draw(frame: &mut Frame, session: &mut Session, ui: &mut UiState) {
     let [header, body, hints, message] = Layout::vertical([
         Constraint::Length(1),
@@ -63,7 +63,7 @@ pub fn draw(frame: &mut Frame, session: &mut Session, ui: &mut UiState) {
             &ui.theme,
         ),
     }
-    // 二选一视图不消费滚动请求,统一清零避免残留到后续文本文件
+    // Whole-file picks do not consume scroll requests; clear them before moving to text files.
     ui.scroll_request = 0;
     ui.hscroll_request = 0;
     draw_hints(frame, hints, &ui.theme);
@@ -76,7 +76,7 @@ pub fn draw(frame: &mut Frame, session: &mut Session, ui: &mut UiState) {
     }
 }
 
-/// 顶部状态条:操作徽章 · 进度条 · 文件路径 · 冲突计数。
+/// Top status bar: operation badge, progress gauge, file path, and conflict count.
 fn draw_header(frame: &mut Frame, area: Rect, session: &Session, theme: &Theme) {
     let entry = session.current_file();
     let pending = match entry {
@@ -86,7 +86,7 @@ fn draw_header(frame: &mut Frame, area: Rect, session: &Session, theme: &Theme) 
     let done = session.written.iter().filter(|&&w| w).count();
     let total = session.files.len();
 
-    // █░ 进度条:已写盘文件数 / 总文件数
+    // Progress gauge: written files / total files.
     const BAR_WIDTH: usize = 10;
     let filled = (done * BAR_WIDTH).checked_div(total).unwrap_or(0);
     let sep = Span::styled("▏", Style::new().fg(theme.border));
@@ -139,8 +139,8 @@ fn draw_header(frame: &mut Frame, area: Rect, session: &Session, theme: &Theme) 
     frame.render_widget(Paragraph::new(Line::from(spans)), area);
 }
 
-/// 二选一视图顶部的说明:按对象类型说明为何不能逐块合并;
-/// 普通文件一侧被删除时说明为修改 / 删除冲突。
+/// Explain why the object requires a whole-file pick rather than chunk merging.
+/// A regular file missing on one side is described as a modify/delete conflict.
 fn pick_notice(kind: PickKind, has_deleted: bool) -> &'static str {
     match kind {
         PickKind::File if has_deleted => tr("ui.deleted_notice"),
@@ -150,7 +150,7 @@ fn pick_notice(kind: PickKind, has_deleted: bool) -> &'static str {
     }
 }
 
-/// 卡片上一侧内容的摘要:已删除 / 链接目标 / 子模块提交 / 字节数。
+/// Summarize one side: deleted, link target, submodule commit, or byte count.
 fn side_summary(kind: PickKind, content: Option<&[u8]>) -> String {
     let Some(content) = content else {
         return tr("ui.side_deleted").to_owned();
@@ -162,14 +162,14 @@ fn side_summary(kind: PickKind, content: Option<&[u8]>) -> String {
             &[("target", &String::from_utf8_lossy(content))],
         ),
         PickKind::Submodule => {
-            // 提交 id 取前 7 位短格式,与 git log --oneline 一致
+            // Use the first seven commit ID characters, matching git log --oneline.
             let id = String::from_utf8_lossy(content);
             tr_f("ui.commit_id", &[("id", id.get(..7).unwrap_or(&id))])
         }
     }
 }
 
-/// 不能逐块合并的冲突的降级视图:LOCAL / REMOTE 两张卡片整条二选一。
+/// Fallback for conflicts that cannot be merged by chunk: choose a LOCAL or REMOTE card.
 fn draw_pick(
     frame: &mut Frame,
     area: Rect,
@@ -196,7 +196,7 @@ fn draw_pick(
         ),
         title,
     );
-    // 说明文案可能宽于面板(如英文),换行展示而非截断句尾
+    // Wrap explanations that exceed pane width, such as English text, to preserve sentence endings.
     frame.render_widget(
         Paragraph::new(Line::styled(notice, Style::new().fg(theme.amber)).centered())
             .wrap(Wrap { trim: true }),
@@ -209,7 +209,7 @@ fn draw_pick(
         Constraint::Fill(1),
     ])
     .areas(cards);
-    // 按键标签取自生效绑定表,改绑后与实际分发保持一致
+    // Derive key labels from effective bindings so overrides match actual dispatch.
     let (left_key, right_key) = (key_hint(Action::TakeLocal), key_hint(Action::TakeRemote));
     pick_card(
         frame,
@@ -245,7 +245,7 @@ fn draw_pick(
     );
 }
 
-/// 单张候选卡片:展示该侧内容摘要,选中侧边框换绿色并在标题加 ✓。
+/// Candidate card with a content summary; selection adds a green border and title check mark.
 fn pick_card(
     frame: &mut Frame,
     area: Rect,
@@ -284,7 +284,7 @@ fn pick_card(
     );
 }
 
-/// 键帽样式的按键 Span(底色微凸起)。
+/// Keycap-style Span with a subtly raised background.
 fn keycap(key: &str, theme: &Theme) -> Span<'static> {
     Span::styled(
         format!(" {key} "),
@@ -292,7 +292,7 @@ fn keycap(key: &str, theme: &Theme) -> Span<'static> {
     )
 }
 
-/// 底部按键提示条(键帽 + 描述),条目来自 [`keymap`](super::keymap) 单一绑定表。
+/// Bottom key hints (keycaps and descriptions) from the shared [`keymap`](super::keymap) table.
 fn draw_hints(frame: &mut Frame, area: Rect, theme: &Theme) {
     let mut spans = vec![Span::raw(" ")];
     for (key, desc) in super::keymap::hint_entries() {
@@ -305,7 +305,7 @@ fn draw_hints(frame: &mut Frame, area: Rect, theme: &Theme) {
     frame.render_widget(Paragraph::new(Line::from(spans)), area);
 }
 
-/// 帮助浮层:圆角边框 + 双栏按键布局,条目来自 [`keymap`](super::keymap) 单一绑定表。
+/// Rounded help overlay with two key columns from the shared [`keymap`](super::keymap) table.
 fn draw_help(frame: &mut Frame, theme: &Theme) {
     let (left_items, right_items) = super::keymap::help_columns();
     let column = |entries: &[(&'static str, &'static str)]| -> Vec<Line<'static>> {
@@ -323,7 +323,7 @@ fn draw_help(frame: &mut Frame, theme: &Theme) {
             .collect()
     };
 
-    // 高度按最长一栏自适应(上下边框各占一行)
+    // Fit height to the longer column, plus one row each for top and bottom borders.
     let overlay_h = left_items.len().max(right_items.len()) as u16 + 2;
     let area = centered_rect(frame.area(), 78, overlay_h);
     frame.render_widget(Clear, area);
@@ -351,7 +351,7 @@ fn draw_help(frame: &mut Frame, theme: &Theme) {
     frame.render_widget(Paragraph::new(column(&right_items)), right);
 }
 
-/// 居中的浮层矩形(不超出屏幕)。
+/// Centered overlay rectangle constrained to the screen.
 fn centered_rect(area: Rect, width: u16, height: u16) -> Rect {
     let w = width.min(area.width);
     let h = height.min(area.height);
@@ -371,7 +371,7 @@ mod tests {
     use ratatui::Terminal;
     use ratatui::backend::TestBackend;
 
-    /// 用 TestBackend 渲染一帧,断言关键内容存在且不 panic
+    /// Render one TestBackend frame without panicking and check essential content.
     #[test]
     fn draw_smoke_renders_key_elements() {
         let merge =
@@ -387,21 +387,21 @@ mod tests {
 
         let content = format!("{:?}", terminal.backend().buffer());
         assert!(content.contains("demo.txt"));
-        // 状态栏操作徽章与进度条
+        // Status-bar operation badge and progress gauge.
         assert!(content.contains("MERGE"));
         assert!(content.contains("░"));
-        // 圆角边框面板与嵌入边框的栏头
+        // Rounded panes with titles embedded in their borders.
         assert!(content.contains("╭"));
         assert!(content.contains("LOCAL"));
         assert!(content.contains("RESULT"));
         assert!(content.contains("REMOTE"));
-        // 未解决冲突:结果栏占位带 + 两侧 gutter 取用箭头
+        // Unresolved conflict: result placeholder and take arrows in both side gutters.
         assert!(content.contains("pending"));
         assert!(content.contains("»"));
         assert!(content.contains("«"));
     }
 
-    /// 窄终端(60 列)渲染不 panic,预算逐级降级
+    /// Narrow terminals (60 columns) render without panicking as width budgets shrink.
     #[test]
     fn draw_narrow_terminal_smoke() {
         let merge =
@@ -417,10 +417,10 @@ mod tests {
         }
     }
 
-    /// 回归:跳转冲突后选中块应留在视口内且不贴底(依赖 scroll 跨帧持久化)
+    /// Regression: conflict navigation keeps the selected chunk visible and above the bottom edge.
     #[test]
     fn scroll_keeps_selected_chunk_in_view() {
-        // 三个冲突,彼此隔着 40 行稳定区;展开渲染保证行数远超视口
+        // Three conflicts separated by 40 stable lines; unfold to exceed the viewport height.
         let stable: String = (1..=40).map(|i| format!("s{i}\n")).collect();
         let base = format!("a\n{stable}b\n{stable}c\n");
         let ours = format!("A\n{stable}B\n{stable}C\n");
@@ -431,10 +431,10 @@ mod tests {
         let mut ui = UiState::default();
         let backend = TestBackend::new(100, 24);
         let mut terminal = Terminal::new(backend).unwrap();
-        // 视口正文高度 = 24 - 状态条/提示/消息各 1 行 - 上下边框 2 行
+        // Body height = 24 - one row each for status/hints/messages - two border rows.
         let body_height = 19usize;
 
-        // 跳到最后一个冲突,再跳回中间的冲突
+        // Jump to the last conflict, then back to the middle one.
         terminal.draw(|f| draw(f, &mut session, &mut ui)).unwrap();
         for step in ["next", "next", "prev"] {
             let FileEntry::Text(m) = session.current_file_mut() else {
@@ -453,17 +453,23 @@ mod tests {
         };
         let (_, starts) = build_rows(m, false);
         let target = starts[m.cursor];
-        assert!(target >= m.scroll, "选中块滚出了视口上方");
-        assert!(target < m.scroll + body_height, "选中块滚出了视口下方");
-        // 不贴底:块首行下方至少还能看到两行块内容
+        assert!(
+            target >= m.scroll,
+            "selected chunk scrolled above the viewport"
+        );
+        assert!(
+            target < m.scroll + body_height,
+            "selected chunk scrolled below the viewport"
+        );
+        // Leave at least two visible content rows below the chunk's first row.
         assert!(
             target + 2 < m.scroll + body_height,
-            "选中块贴在视口底部(target={target}, scroll={})",
+            "selected chunk is at the viewport bottom (target={target}, scroll={})",
             m.scroll
         );
     }
 
-    /// 手动滚动脱离光标跟随且重绘不回拉;作用于光标的动作重新吸附
+    /// Manual scrolling disables following without snapping back; cursor actions restore it.
     #[test]
     fn manual_scroll_detaches_and_actions_reattach() {
         let stable: String = (1..=200).map(|i| format!("s{i}\n")).collect();
@@ -483,7 +489,7 @@ mod tests {
         terminal.draw(|f| draw(f, &mut session, &mut ui)).unwrap();
         assert_eq!(scroll_of(&session), (0, true));
 
-        // 两次半页下滚:请求被消费,视口前进并脱离跟随
+        // Two half-page scrolls consume the request, advance the viewport, and disable following.
         ui.scroll_request = 2;
         terminal.draw(|f| draw(f, &mut session, &mut ui)).unwrap();
         let (scrolled, follow) = scroll_of(&session);
@@ -491,11 +497,11 @@ mod tests {
         assert!(!follow);
         assert_eq!(ui.scroll_request, 0);
 
-        // 光标块已在视口外,重绘不得回拉(脱离跟随的意义所在)
+        // The cursor chunk is outside the viewport; redraw must not snap back.
         terminal.draw(|f| draw(f, &mut session, &mut ui)).unwrap();
         assert_eq!(scroll_of(&session), (scrolled, false));
 
-        // 作用于光标的动作(如跳冲突)恢复跟随,视口吸附回光标块
+        // Cursor actions such as conflict navigation restore following and snap back to the chunk.
         super::super::handle_file_key(
             &mut session,
             super::super::keymap::Action::NextConflict,
@@ -504,10 +510,13 @@ mod tests {
         terminal.draw(|f| draw(f, &mut session, &mut ui)).unwrap();
         let (snapped, follow) = scroll_of(&session);
         assert!(follow);
-        assert!(snapped < scrolled, "视口应吸附回顶部的冲突块");
+        assert!(
+            snapped < scrolled,
+            "viewport must snap back to the conflict near the top"
+        );
     }
 
-    /// 水平平移:请求按固定步长结算并钳制在溢出范围内,不影响光标跟随
+    /// Horizontal scroll uses fixed steps, clamps to overflow, and preserves cursor following.
     #[test]
     fn hscroll_settles_with_step_and_clamp() {
         let long = "x".repeat(200);
@@ -526,29 +535,32 @@ mod tests {
 
         terminal.draw(|f| draw(f, &mut session, &mut ui)).unwrap();
         assert_eq!(hscroll_of(&session), (0, true));
-        // 未平移但行溢出:右缘已有截断指示
+        // An overflowing line shows a right-edge truncation marker even before scrolling.
         assert!(format!("{:?}", terminal.backend().buffer()).contains('…'));
 
-        // 右移一步:固定 8 列,消费请求且保持跟随(水平平移不脱离光标)
+        // One rightward step consumes the request, moves eight columns, and preserves following.
         ui.hscroll_request = 1;
         terminal.draw(|f| draw(f, &mut session, &mut ui)).unwrap();
         assert_eq!(hscroll_of(&session), (8, true));
         assert_eq!(ui.hscroll_request, 0);
 
-        // 大量右移:钳制在最大溢出量(不会滚出全空白)
+        // Excessive rightward scrolling clamps to maximum overflow, avoiding an empty viewport.
         ui.hscroll_request = 100;
         terminal.draw(|f| draw(f, &mut session, &mut ui)).unwrap();
         let (clamped, _) = hscroll_of(&session);
-        assert!(clamped >= 8, "应向右前进");
-        assert!(clamped < 200, "上限必须小于行宽");
+        assert!(clamped >= 8, "must advance to the right");
+        assert!(
+            clamped < 200,
+            "scroll limit must be smaller than the line width"
+        );
 
-        // 左移超量:钳回 0
+        // Excessive leftward scrolling clamps to zero.
         ui.hscroll_request = -1000;
         terminal.draw(|f| draw(f, &mut session, &mut ui)).unwrap();
         assert_eq!(hscroll_of(&session).0, 0);
     }
 
-    /// 二进制文件的二选一条目
+    /// Whole-file pick entry for a binary file.
     fn binary_pick() -> FileEntry {
         FileEntry::Pick {
             path: "logo.png".to_owned(),
@@ -559,7 +571,7 @@ mod tests {
         }
     }
 
-    /// 用 TestBackend 渲染单个条目的一帧,返回缓冲区文本
+    /// Render one entry with TestBackend and return the frame's buffer text.
     fn render_entry(entry: FileEntry) -> String {
         let mut session = Session::new(vec![entry], "merge".to_owned());
         let mut terminal = Terminal::new(TestBackend::new(100, 20)).unwrap();
@@ -569,26 +581,29 @@ mod tests {
         format!("{:?}", terminal.backend().buffer())
     }
 
-    /// 二进制条目渲染不 panic
+    /// Binary entries render without panicking.
     #[test]
     fn draw_binary_entry_smoke() {
         let content = render_entry(binary_pick());
         assert!(content.contains("logo.png"));
         assert!(content.contains("2 bytes"));
-        // 按键说明由生效绑定表代入(未改绑时为默认键位)
+        // Key instructions use effective bindings, which are defaults without overrides.
         assert!(content.contains("press h to choose"));
         assert!(content.contains("h / l choose · u undo · then w to write"));
     }
 
-    /// 说明文案宽于面板(英文 71 列 > 64 列)时换行展示,不截断句尾
+    /// Wrap explanations wider than the pane (71 English columns > 64) without truncating endings.
     #[test]
     fn binary_notice_wraps_instead_of_clipping() {
         let content = render_entry(binary_pick());
         assert!(content.contains("choose one side as"));
-        assert!(content.contains("a whole"), "说明文案句尾被截断");
+        assert!(
+            content.contains("a whole"),
+            "explanation sentence ending was truncated"
+        );
     }
 
-    /// 符号链接条目:卡片展示链接目标,已删除的一侧如实标注
+    /// Symlink cards display targets and correctly label deleted sides.
     #[test]
     fn draw_symlink_entry_shows_targets() {
         let content = render_entry(FileEntry::Pick {
@@ -603,7 +618,7 @@ mod tests {
         assert!(content.contains("(deleted)"));
     }
 
-    /// 修改 / 删除冲突:说明改为修改-删除,删除侧卡片标注已删除
+    /// Modify/delete conflicts have the appropriate explanation and a deleted-side label.
     #[test]
     fn draw_modify_delete_entry_explains_deletion() {
         let content = render_entry(FileEntry::Pick {
@@ -618,7 +633,7 @@ mod tests {
         assert!(content.contains("6 bytes") && content.contains("(deleted)"));
     }
 
-    /// 子模块条目:卡片展示两侧记录的短提交 id
+    /// Submodule cards display each side's recorded short commit ID.
     #[test]
     fn draw_submodule_entry_shows_commits() {
         let content = render_entry(FileEntry::Pick {
@@ -631,6 +646,9 @@ mod tests {
         assert!(content.contains("Submodule"));
         assert!(content.contains("commit 2222222"));
         assert!(content.contains("commit 3333333"));
-        assert!(!content.contains("22222222"), "应展示 7 位短 id");
+        assert!(
+            !content.contains("22222222"),
+            "must display a seven-character short ID"
+        );
     }
 }

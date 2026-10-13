@@ -32,31 +32,31 @@ pub struct Cli {
     pub lang: LangArg,
 }
 
-/// 界面语言选择(命令行与配置文件 `[ui] lang` 共用)。
+/// UI language selection shared by the CLI and `[ui] lang` configuration.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, clap::ValueEnum, serde::Deserialize)]
 #[serde(rename_all = "lowercase")]
 pub enum LangArg {
-    /// 按系统 locale 自动选择(zh 前缀用中文,其余英文)
+    /// Detect from the system locale (Chinese for a zh prefix, English otherwise)
     Auto,
-    /// 中文
+    /// Chinese
     Zh,
-    /// 英文
+    /// English
     En,
 }
 
-/// 界面主题选择(命令行与配置文件 `[ui] theme` 共用)。
+/// UI theme selection shared by the CLI and `[ui] theme` configuration.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, clap::ValueEnum, serde::Deserialize)]
 #[serde(rename_all = "lowercase")]
 pub enum ThemeArg {
-    /// 按终端环境自动选择(读 COLORFGBG,检测不到用深色)
+    /// Detect from COLORFGBG, falling back to the dark theme
     Auto,
-    /// 深色(Tokyo Night)
+    /// Dark (Tokyo Night)
     Dark,
-    /// 浅色(Maple Light,适配浅色终端背景)
+    /// Light (Maple Light, for light terminal backgrounds)
     Light,
 }
 
-/// 支持的子命令。
+/// Supported subcommands.
 #[derive(Debug, Subcommand)]
 pub enum Commands {
     /// Run `git merge` and take over conflicts if any
@@ -82,14 +82,14 @@ pub enum Commands {
 impl Cli {
     /// Distribute and execute the selected subcommands.
     pub fn run(self) -> Result<()> {
-        // 补全脚本生成先于配置加载:它随 shell 启动执行,
-        // 不应被配置文件错误或 git 环境问题阻断
+        // Generate completions before loading configuration: shell startup must
+        // not be blocked by configuration errors or Git environment issues.
         if let Some(Commands::Completions(args)) = &self.command {
             commands::completions::run(args.shell);
             return Ok(());
         }
-        // --lang 显式指定时最早生效,让配置文件自身的报错也用对语言;
-        // i18n::init 首次调用生效,因此调用顺序即优先级:命令行 > 配置 > 系统探测
+        // Apply an explicit --lang early so configuration errors use that language.
+        // The first i18n::init wins: CLI > configuration > system detection.
         match self.lang {
             LangArg::Zh => crate::i18n::init(crate::i18n::Lang::Zh),
             LangArg::En => crate::i18n::init(crate::i18n::Lang::En),
@@ -107,7 +107,7 @@ impl Cli {
 
         let verbose = self.verbose || config.ui.verbose.unwrap_or(false);
         let dir = self.repo.unwrap_or_else(|| PathBuf::from("."));
-        // 主题:命令行显式指定 > 配置文件 > 终端环境探测
+        // Theme precedence: explicit CLI option > configuration > terminal detection.
         let theme = match self.theme {
             ThemeArg::Auto => config.ui.theme.unwrap_or(ThemeArg::Auto),
             explicit => explicit,
@@ -129,7 +129,7 @@ impl Cli {
             Some(Commands::Switch(args)) => commands::switch::run(args, verbose, &dir, light),
             Some(Commands::File(args)) => commands::file::run(args, light),
             Some(Commands::Abort) => commands::abort::run(verbose, &dir),
-            // 已在配置加载前处理并早退
+            // Already handled before configuration loading.
             Some(Commands::Completions(_)) => Ok(()),
         }
     }
