@@ -438,7 +438,9 @@ impl Git {
     /// 将解决后的内容写入工作区文件并 `git add`。
     pub fn stage_resolved(&self, path: &str, content: &[u8]) -> Result<(), GitError> {
         std::fs::write(self.top.join(path), content)?;
-        self.run_ok(&["add", "--", path])?;
+        // 路径按字面匹配:文件名可能含 `*` `?` `[` 等 glob 字符,按 pathspec
+        // 解析会把匹配到的其他文件(含未跟踪文件)一并暂存进合并提交
+        self.run_ok(&["--literal-pathspecs", "add", "--", path])?;
         Ok(())
     }
 

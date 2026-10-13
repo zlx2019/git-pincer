@@ -167,6 +167,40 @@ fn resolve_and_continue_completes_merge() {
     assert!(content.contains("merged"));
 }
 
+/// 冲突文件名含 glob 字符时按字面暂存:`[ab].txt` 作 pathspec 会匹配
+/// a.txt / b.txt,不能把与合并无关的本地改动和未跟踪文件一并暂存
+/// (方括号在 Windows 文件名中同样合法)
+#[test]
+fn stage_resolved_matches_path_literally() {
+    let repo = TempRepo::new("literal");
+    repo.write("[ab].txt", "base\n");
+    repo.write("a.txt", "a\n");
+    repo.commit_all("init");
+    repo.git(&["checkout", "-b", "feature"]);
+    repo.write("[ab].txt", "feature\n");
+    repo.commit_all("feature change");
+    repo.git(&["checkout", "main"]);
+    repo.write("[ab].txt", "main\n");
+    repo.commit_all("main change");
+    // 与本次合并无关的本地改动与未跟踪文件
+    repo.write("a.txt", "local wip\n");
+    repo.write("b.txt", "untracked\n");
+    assert!(!repo.git_allow_fail(&["merge", "--no-edit", "feature"]));
+
+    let git = Git::discover(&repo.dir, false).unwrap();
+    git.stage_resolved("[ab].txt", b"resolved\n").unwrap();
+    assert!(git.conflicted_files().unwrap().is_empty());
+    let status = repo.git(&["status", "--porcelain"]);
+    assert!(
+        status.lines().any(|l| l == " M a.txt"),
+        "a.txt 不应被暂存:\n{status}"
+    );
+    assert!(
+        status.lines().any(|l| l == "?? b.txt"),
+        "b.txt 应保持未跟踪:\n{status}"
+    );
+}
+
 #[test]
 fn abort_restores_clean_state() {
     let repo = conflicted_repo("abort");
