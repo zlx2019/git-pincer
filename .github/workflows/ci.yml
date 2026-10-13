@@ -1,7 +1,3 @@
-# 生成项目的 CI。
-# 所有 job 都带有 repository 守卫：模板仓库（zlx2019/rust-cli-template）自身的
-# Cargo.toml 含 {{project-name}} 占位符，cargo 无法解析，因此在模板仓库中
-# 全部跳过（模板仓库由 template-ci.yml 负责检查）。
 name: CI
 
 on:
@@ -9,7 +5,7 @@ on:
     branches: [main]
   pull_request:
 
-# 同一分支的并发任务，新提交会取消正在进行的旧任务，节省 CI 资源
+# a new push to a branch cancels the run still in progress for it, saving CI minutes
 concurrency:
   group: ci-${{ github.ref }}
   cancel-in-progress: true
@@ -18,10 +14,9 @@ env:
   CARGO_TERM_COLOR: always
 
 jobs:
-  # 格式化与 Clippy 静态检查
+  # formatting and clippy
   lint:
     name: Format & Clippy
-    if: github.repository != 'zlx2019/rust-cli-template'
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
@@ -31,12 +26,11 @@ jobs:
       - name: cargo clippy
         run: cargo clippy --all-targets --all-features -- -D warnings
 
-  # 单元测试与集成测试（使用 nextest）
-  # 覆盖 Release 发布的三个平台家族，Windows/macOS 特有路径（剪贴板、
-  # 编辑器回退、配置路径、CRLF）不再只靠交叉编译裸检查
+  # unit and integration tests (nextest) on the three platform families the Release ships:
+  # the Windows/macOS-specific paths (clipboard, editor fallback, config path, CRLF)
+  # are exercised for real instead of only being cross-compiled
   test:
     name: Test ${{ matrix.os }}
-    if: github.repository != 'zlx2019/rust-cli-template'
     strategy:
       fail-fast: false
       matrix:
@@ -51,21 +45,19 @@ jobs:
       - name: cargo nextest
         run: cargo nextest run --all-features --no-tests pass
 
-  # 依赖的安全公告与许可证审计
+  # security advisories and license audit of the dependencies
   deny:
     name: Cargo Deny
-    if: github.repository != 'zlx2019/rust-cli-template'
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
       - uses: EmbarkStudios/cargo-deny-action@v2
 
-  # 拼写检查
+  # spell check
   typos:
     name: Typos
-    if: github.repository != 'zlx2019/rust-cli-template'
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
-      # 锁定版本，避免上游 master 变更导致 CI 意外失败（dependabot 会定期升级）
+      # pinned so upstream changes can't break CI unexpectedly (dependabot bumps it periodically)
       - uses: crate-ci/typos@v1.48.0

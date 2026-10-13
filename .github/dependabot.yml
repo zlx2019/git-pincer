@@ -1,6 +1,5 @@
 version: 2
 updates:
-  # Rust 依赖（Cargo）
   - package-ecosystem: cargo
     directory: /
     schedule:
@@ -10,7 +9,6 @@ updates:
       prefix: chore
       include: scope
 
-  # GitHub Actions
   - package-ecosystem: github-actions
     directory: /
     schedule:

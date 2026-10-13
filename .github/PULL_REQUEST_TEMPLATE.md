@@ -1,20 +1,22 @@
-## 变更说明
+## Change Description
 
-<!-- 简要描述本次 PR 的目的与内容 -->
+<!-- Briefly describe the purpose and content of this PR -->
 
-## 变更类型
+## Change Type
 
-- [ ] feat: 新功能
-- [ ] fix: 缺陷修复
-- [ ] docs: 文档
-- [ ] refactor: 重构
-- [ ] perf: 性能优化
-- [ ] test: 测试
-- [ ] chore: 构建 / 杂项
+- [ ] feat: New feature
+- [ ] fix: Bug fix
+- [ ] docs: Documentation
+- [ ] refactor: Refactoring
+- [ ] perf: Performance optimization
+- [ ] test: Testing
+- [ ] build / ci / chore: Build, CI or miscellaneous
 
-## 检查清单
+## Checklist
 
-- [ ] 已通过 `cargo fmt` 与 `cargo clippy`
-- [ ] 已通过 `cargo nextest run`
-- [ ] 提交信息符合 Conventional Commits 规范
-- [ ] 已更新相关文档（如有必要）
+- [ ] Passed `cargo fmt --all -- --check` and `cargo clippy --all-targets --all-features -- -D warnings`
+- [ ] Passed `cargo nextest run --all-features --no-tests pass`
+- [ ] A bug fix comes with a test that fails without it
+- [ ] New user-facing text is added to both `locales/en.conf` and `locales/zh.conf`
+- [ ] Commit messages follow Conventional Commits and are written in English
+- [ ] Relevant documentation has been updated (if necessary)

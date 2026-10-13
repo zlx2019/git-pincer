@@ -5,9 +5,9 @@
 //! temporary repository, and repo-local configuration isolates the tests from
 //! the user's global settings (signing, hooks, etc.).
 
-// clippy.toml 的 allow-unwrap-in-tests 只覆盖 #[test] 函数体,
-// 集成测试的辅助函数不在其列,这里在测试 crate 层面显式放行
-#![allow(clippy::unwrap_used)]
+// clippy.toml's allow-*-in-tests switches only cover `#[test]` function bodies;
+// helper functions of an integration test are not covered, so allow them for the whole test crate
+#![allow(clippy::unwrap_used, clippy::expect_used, clippy::panic)]
 
 use std::path::PathBuf;
 use std::process::Command;

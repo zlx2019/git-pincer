@@ -1,30 +1,39 @@
 ---
-name: Bug 报告
-about: 报告一个缺陷以帮助我们改进
+name: Bug Report
+about: Report a bug to help us improve
 title: "[Bug] "
 labels: bug
 ---
 
-## 问题描述
+## Problem Description
 
-<!-- 清晰简洁地描述这个 Bug -->
+<!-- Describe the bug clearly and concisely -->
 
-## 复现步骤
+## Reproduction Steps
 
 1.
 2.
 3.
 
-## 期望行为
+<!--
+The easiest reports to act on come with a way to reproduce without your repository:
+- `git-pincer file <conflicted-file>` works on a single conflict-marked file, or
+- a short script that builds a minimal repository with the conflict.
+-->
 
-<!-- 描述你期望发生什么 -->
+## Expected Behavior
 
-## 环境信息
+<!-- Describe what you expect to happen -->
 
-- OS:
-- Rust 版本:
-- 项目版本 / commit:
+## Environment Information
 
-## 补充信息
+- OS and terminal emulator:
+- git-pincer version (`git-pincer --version`) and install method (cargo / npm / release binary):
+- git version (`git --version`):
+- Conflict source (merge / rebase / pull / cherry-pick / revert / am / stash pop / ...):
+- Rust version (only if built from source):
+- Custom `config.toml` (paste the relevant part, if any):
 
-<!-- 日志、截图等其他有助于定位问题的信息 -->
+## Additional Information
+
+<!-- Output of `git-pincer -v ...`, screenshots or a screen recording of the TUI, and anything else that may help in troubleshooting the issue -->

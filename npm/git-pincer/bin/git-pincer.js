@@ -1,13 +1,9 @@
 #!/usr/bin/env node
 "use strict";
 
-// git-pincer 的 npm 启动垫片:
-// 按当前平台定位 optionalDependencies 里对应的二进制子包, 并把参数原样转发给它。
-
 const { spawnSync } = require("node:child_process");
 const path = require("node:path");
 
-// 判断 Linux 是否为 musl 环境(运行时报告中没有 glibc 版本信息即视为 musl)
 function isMusl() {
   try {
     return !process.report.getReport().header.glibcVersionRuntime;
@@ -16,7 +12,6 @@ function isMusl() {
   }
 }
 
-// 根据平台与架构推导对应的二进制子包名, 不支持的平台返回 null
 function platformPackage() {
   const { platform, arch } = process;
   if (platform === "darwin" && arch === "arm64") return "@zero9501/git-pincer-darwin-arm64";
@@ -29,7 +24,6 @@ function platformPackage() {
   return null;
 }
 
-// 定位子包内的可执行文件绝对路径, 失败时输出指引并退出
 function binaryPath() {
   const pkg = platformPackage();
   if (!pkg) {
@@ -52,7 +46,6 @@ if (result.error) {
   process.exit(1);
 }
 if (result.signal) {
-  // 被信号终止时对自身重放同一信号, 让退出码符合 shell 约定(128+N)
   process.kill(process.pid, result.signal);
 }
 process.exit(result.status ?? 1);

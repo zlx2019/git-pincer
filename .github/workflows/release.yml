@@ -1,9 +1,9 @@
 name: Release
-# 推送标签时：
-#   - 生成 changelog
-#   - 创建 github Release（并附加多平台构建产物）
-#   - 发布 crate.io
-#   - 发布 npm（主包 + 各平台二进制子包）
+# On a pushed `v*` tag:
+#   - generate the release notes with git-cliff
+#   - create the GitHub Release and attach the per-platform binaries
+#   - publish to crates.io (stable tags only)
+#   - publish to npm: the main package plus one binary package per platform (stable tags only)
 on:
   push:
     tags:
@@ -25,21 +25,21 @@ jobs:
         with:
           config: cliff.toml
           args: ${{ contains(github.ref_name, '-') && format('--unreleased --tag {0}', github.ref_name) || '--latest' }} --strip header
+        # Do not set GITHUB_REPO here: it makes git-cliff query the GitHub API for
+        # commit metadata, which cliff.toml does not need (see the note there).
         env:
           OUTPUT: CHANGES.md
-          GITHUB_REPO: ${{ github.repository }}
 
       - name: Create release
         uses: softprops/action-gh-release@v2
         with:
           body_path: CHANGES.md
           token: ${{ secrets.GITHUB_TOKEN }}
-          # SemVer 预发布标签(含 "-",如 v0.1.0-rc.1)自动标记为 Pre-release
+          # SemVer pre-release tags (contain "-", e.g. v0.1.0-rc.1) are marked as pre-releases
           prerelease: ${{ contains(github.ref_name, '-') }}
 
   build:
     name: Build ${{ matrix.target }}
-    if: github.repository != 'zlx2019/rust-cli-template'
     needs: changelog
     runs-on: ${{ matrix.os }}
     strategy:
@@ -82,7 +82,7 @@ jobs:
           archive: $bin-$tag-$target
           include: README.md,LICENSE
           leading-dir: true
-          # 每个产物附带 sha256 校验和文件,供下载方验证完整性
+          # ship a sha256 checksum file next to every artifact so downloads can be verified
           checksum: sha256
           token: ${{ secrets.GITHUB_TOKEN }}
 
@@ -94,12 +94,12 @@ jobs:
     steps:
       - uses: actions/checkout@v4
       - uses: actions-rust-lang/setup-rust-toolchain@v1
-      # tag 与 Cargo.toml 版本不一致时中止,防止发出与 tag 不符的版本
+      # abort when the tag and the Cargo.toml version disagree, so a mismatched version is never published
       - name: Verify tag matches package version
         run: |
           pkg=$(cargo metadata --no-deps --format-version 1 | jq -r '.packages[0].version')
           if [ "v$pkg" != "${{ github.ref_name }}" ]; then
-            echo "::error::tag ${{ github.ref_name }} 与 Cargo.toml 版本 $pkg 不一致"
+            echo "::error::tag ${{ github.ref_name }} does not match the Cargo.toml version $pkg"
             exit 1
           fi
       - name: Publish
@@ -124,10 +124,11 @@ jobs:
         run: gh release download "$TAG" --pattern "*.tar.gz" --pattern "*.zip" --dir /tmp/assets
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-      # 从 release 压缩包组装出 6 个平台子包 + 1 个主包
+      # assemble 6 per-platform packages and 1 main package from the release archives
       - name: Assemble npm packages
         run: node npm/build.mjs "$TAG" /tmp/assets
-      # 先发平台子包, 主包最后发, 避免出现主包可装而子包缺失的窗口期
+      # publish the platform packages first and the main package last, so there is never a
+      # window where the main package is installable but its platform package is missing
       - name: Publish packages
         run: |
           for pkg in npm/dist/@zero9501/*; do
