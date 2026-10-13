@@ -26,10 +26,12 @@ jobs:
         with:
           config: cliff.toml
           args: ${{ contains(github.ref_name, '-') && format('--unreleased --tag {0}', github.ref_name) || '--latest' }} --strip header
-        # Do not set GITHUB_REPO here: it makes git-cliff query the GitHub API for
-        # commit metadata, which cliff.toml does not need (see the note there).
+        # cliff.toml builds its links from `remote.github.*`, so git-cliff queries the
+        # GitHub API: name the repository and authenticate to avoid the anonymous rate limit.
         env:
           OUTPUT: CHANGES.md
+          GITHUB_REPO: ${{ github.repository }}
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
 
       - name: Create release
         uses: softprops/action-gh-release@v2

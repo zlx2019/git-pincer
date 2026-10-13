@@ -6,10 +6,10 @@
 #       git cliff --unreleased --strip header      # what the next release will contain
 #       git cliff --latest --strip header          # notes of the latest release
 #
-# Offline by design: every link below is built from the hard-coded repository URL.
-# Do NOT reference `remote.github.*` in the template or export GITHUB_REPO — git-cliff
-# would then query the GitHub API (network, rate limits) just to learn the repo name,
-# and renders nothing at all when that call fails.
+# Links are built from `remote.github.*`, so git-cliff queries the GitHub API: it needs
+# network access, and a GITHUB_TOKEN to stay clear of the anonymous rate limit
+# (release.yml provides one). The repository is taken from the `origin` remote, or from
+# GITHUB_REPO=owner/repo.
 
 [changelog]
 header = """
@@ -19,7 +19,7 @@ All notable changes to this project will be documented in this file. See [conven
 # https://keats.github.io/tera/docs/#introduction
 body = """
 {%- macro remote_url() -%}
-  https://github.com/zlx2019/git-pincer
+  https://github.com/{{ remote.github.owner }}/{{ remote.github.repo }}
 {%- endmacro -%}
 ---
 {% if version %}\
