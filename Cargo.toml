@@ -39,6 +39,9 @@ missing_docs = "warn"
 
 [lints.clippy]
 unwrap_used = "warn"
+expect_used = "warn"
+panic = "warn"
+dbg_macro = "warn"
 
 [workspace]
 members = []

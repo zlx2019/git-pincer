@@ -1,4 +1,11 @@
-# Clippy 配置
-# 允许在测试代码中使用 unwrap，与 Cargo.toml [lints.clippy] 的 unwrap_used 配套：
-# 业务代码禁用 unwrap，但单元测试 / 集成测试中可自由使用。
+# Clippy configuration.
+#
+# Pairs with [lints.clippy] in Cargo.toml: production code must not use
+# unwrap / expect / panic / dbg, while tests may use them freely.
+# Note: these switches only cover `#[test]` function bodies and `#[cfg(test)]`
+# modules. Helper functions in integration tests (tests/*.rs) need a crate-level
+# `#![allow(...)]` instead.
 allow-unwrap-in-tests = true
+allow-expect-in-tests = true
+allow-dbg-in-tests = true
+allow-panic-in-tests = true
