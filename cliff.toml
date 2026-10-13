@@ -88,16 +88,18 @@ commit_parsers = [
     { message = "^chore\\(version\\):", skip = true },
     { message = "^docs?(\\([^)]*\\))?: .*changelog", skip = true },
     # --- grouped -----------------------------------------------------------------
-    { message = "^feat", group = "<!-- 00 -->🚀 Features" },
-    { message = "^fix", group = "<!-- 01 -->🐛 Bug Fixes" },
-    { message = "^perf", group = "<!-- 02 -->⚡ Performance" },
-    { message = "^refactor", group = "<!-- 03 -->🚜 Refactoring" },
-    { message = "^doc", group = "<!-- 04 -->📚 Documentation" },
-    { message = "^style", group = "<!-- 05 -->🎨 Style" },
-    { message = "^test", group = "<!-- 06 -->🧪 Tests" },
-    { message = "^build", group = "<!-- 07 -->📦 Build System" },
-    { message = "^ci", group = "<!-- 08 -->🤖 Continuous Integration" },
-    { message = "^chore", group = "<!-- 09 -->⚙️ Miscellaneous Chores" },
+    # The type rules require the full `type(scope)!:` shape, so a subject that merely
+    # starts with the word ("feat add x", "fixes the typo") falls through to Other.
+    { message = "^feat(\\([^)]*\\))?!?:", group = "<!-- 00 -->🚀 Features" },
+    { message = "^fix(\\([^)]*\\))?!?:", group = "<!-- 01 -->🐛 Bug Fixes" },
+    { message = "^perf(\\([^)]*\\))?!?:", group = "<!-- 02 -->⚡ Performance" },
+    { message = "^refactor(\\([^)]*\\))?!?:", group = "<!-- 03 -->🚜 Refactoring" },
+    { message = "^docs?(\\([^)]*\\))?!?:", group = "<!-- 04 -->📚 Documentation" },
+    { message = "^style(\\([^)]*\\))?!?:", group = "<!-- 05 -->🎨 Style" },
+    { message = "^test(\\([^)]*\\))?!?:", group = "<!-- 06 -->🧪 Tests" },
+    { message = "^build(\\([^)]*\\))?!?:", group = "<!-- 07 -->📦 Build System" },
+    { message = "^ci(\\([^)]*\\))?!?:", group = "<!-- 08 -->🤖 Continuous Integration" },
+    { message = "^chore(\\([^)]*\\))?!?:", group = "<!-- 09 -->⚙️ Miscellaneous Chores" },
     # `git revert` titles its commits `Revert "..."`
     { message = "^[Rr]evert", group = "<!-- 10 -->◀️ Revert" },
     { message = ".*", group = "<!-- 11 -->💼 Other" },
