@@ -2,16 +2,23 @@
   <img src="./assets/logo.gif" width="320" alt="git-pincer logo">
 </p>
 
-# git-pincer
+<h1 align="center">git-pincer</h1>
 
-[![CI](https://github.com/zlx2019/git-pincer/actions/workflows/ci.yml/badge.svg)](https://github.com/zlx2019/git-pincer/actions/workflows/ci.yml)
-[![crates.io](https://img.shields.io/crates/v/git-pincer.svg)](https://crates.io/crates/git-pincer)
-[![License: MIT](https://img.shields.io/badge/license-MIT-blue.svg)](./LICENSE)
-[![Rust](https://img.shields.io/badge/rust-1.96.0%2B-orange.svg)](https://www.rust-lang.org)
+<p align="center">
+  <a href="https://github.com/zlx2019/git-pincer/actions/workflows/ci.yml"><img src="https://github.com/zlx2019/git-pincer/actions/workflows/ci.yml/badge.svg" alt="CI" /></a>
+  <a href="https://crates.io/crates/git-pincer"><img src="https://img.shields.io/crates/v/git-pincer.svg" alt="crates.io" /></a>
+  <a href="https://www.npmjs.com/package/git-pincer"><img src="https://img.shields.io/npm/v/git-pincer.svg" alt="npm" /></a>
+  <a href="./LICENSE"><img src="https://img.shields.io/badge/license-MIT-blue.svg" alt="License: MIT" /></a>
+  <a href="https://www.rust-lang.org"><img src="https://img.shields.io/badge/rust-1.96.0%2B-orange.svg" alt="Rust" /></a>
+</p>
 
-[English](./README.md) | **简体中文**
+<p align="center">
+  <a href="./README.md">English</a> · <b>简体中文</b>
+</p>
 
-> **「蟹钳」**，一个使用 Rust 编写的 Git 终端工具，专注于帮助开发者更轻松地解决 Git Merge、Rebase、Cherry-pick 等场景下的代码冲突。
+<p align="center">
+  <b>「蟹钳」</b>，一个使用 Rust 编写的 Git 终端工具，专注于帮助开发者更轻松地解决 Git Merge、Rebase、Cherry-pick 等场景下的代码冲突。
+</p>
 
 项目名称来源于 Rust 的吉祥物——螃蟹。Git 冲突就像两个分支同时「夹住」了同一段代码，而蟹钳象征着稳定、精准与掌控。希望它能够像一只可靠的蟹钳，帮助开发者牢牢抓住冲突双方，更高效地理解差异、完成合并。
 
@@ -19,14 +26,14 @@
 
 ## 特性
 
-- **三栏合并界面** — 本地 | 结果 | 远端,块级色带按改动类型着色,沿用 IDEA 语义:蓝 = 修改、绿 = 新增、灰 = 删除、红 = 冲突;块解决后色带随之消失。
-- **精细的差异呈现** — 改动块内 delta 式词级高亮,配合语法着色(syntect 的 Maple 主题,按扩展名匹配,超大文件自动降级)。
+- **三栏合并界面** — 本地 | 结果 | 远端,色带沿用 IDEA 语义:蓝 = 修改、绿 = 新增、灰 = 删除、红 = 冲突;块解决后色带随之消失。
+- **精细的差异呈现** — 改动块内 delta 式词级高亮,并按扩展名做语法着色(超大文件自动关闭)。
 - **接管完整流程** — 全部文件解决后自动执行 `git add` 与对应的 `--continue`,重新探测并循环,直到仓库干净;多提交摘取、多轮变基开箱即用。
-- **RPG 像素风操作菜单** — 在干净仓库中裸运行 `git-pincer` 弹出像素风菜单,状态窗把仓库映射成角色面板(Lv. = 提交数、HP = 未提交改动、MP = 贮藏、EXP = 待推送);选操作,再选分支(merge / rebase / switch)或提交(cherry-pick / revert),成功与失败都在 TUI 内弹框反馈并回到菜单——不闪屏、不退出。
+- **RPG 像素风操作菜单** — 在干净仓库中裸运行 `git-pincer` 弹出像素风菜单:选操作,再选分支(merge / rebase / switch)或提交(cherry-pick / revert)。状态窗把仓库映射成角色面板(Lv. = 提交数、HP = 未提交改动、MP = 贮藏、EXP = 待推送);成功与失败都在 TUI 内弹框反馈,不闪屏、不退出。
 - **广泛的冲突来源支持** — merge、rebase、pull、cherry-pick、revert、`git am`,以及 `stash pop`、`checkout -m`、`apply --3way` 这类没有 `--continue` 的场景。
-- **原生 git,无黑魔法** — 全部 shell out 调用你的 git 二进制(与 lazygit / IDEA 同路),认证、hooks、合并策略、rerere 完全继承现有配置;参数以数组传递不经过 shell(构造上杜绝注入),并清除宿主 `GIT_DIR` 类环境变量,防止从钩子中被调起时嵌套 git 劫持到错误仓库。
+- **原生 git,无黑魔法** — 直接调用你的 git 二进制(与 lazygit / IDEA 同路),认证、hooks、合并策略、rerere 完全继承现有配置;参数以数组传递、不经 shell,并清除宿主 `GIT_DIR` 类环境变量,避免从钩子中被调起时劫持到错误仓库。
 - **终端自适应主题** — 深色(Tokyo Night)/ 浅色(Maple Light)双主题,`--theme <auto|dark|light>` 指定,`auto` 经 `COLORFGBG` 检测;不支持真彩的终端自动量化为 xterm-256 色。
-- **中英双语界面** — 菜单、提示与输出全部提供中英文,`--lang <auto|zh|en>` 指定,`auto` 跟随系统 locale;文案维护在 `locales/*.conf`,编译期嵌入——依然是单个二进制。
+- **中英双语界面** — 菜单、提示与输出均提供中英文,`--lang <auto|zh|en>` 指定,`auto` 跟随系统 locale;文案编译期嵌入,依然是单个二进制。
 - **周全的兜底** — 二进制冲突降级为整文件二选一;免 git 的 `file` 模式直接解析冲突标记;非 TTY 环境给出可读报错而非 panic。
 
 ## 安装
