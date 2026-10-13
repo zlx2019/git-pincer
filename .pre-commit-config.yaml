@@ -1,7 +1,5 @@
-# pre-commit 在 git commit 时, 会根据以下配置对代码进行预检查，只有所有检查都通过时才会成功提交。
-
-# pre-commit 检测配置
-# pre-commit 主要用于 git commit之前，对代码进行检查.
+# pre-commit runs the checks below on `git commit`; the commit only succeeds when all of them pass.
+# Install the hook with `pre-commit install`.
 
 fail_fast: false
 repos:
@@ -17,9 +15,9 @@ repos:
       - id: mixed-line-ending
       - id: trailing-whitespace
   - repo: local
-    # 自定义hook检测
+    # local hooks
     hooks:
-      # 对代码进行格式化.
+      # formatting (check only; run `cargo fmt --all` to fix)
       - id: cargo-fmt
         name: cargo fmt
         description: Format files with rustfmt.
@@ -27,7 +25,7 @@ repos:
         language: system
         files: \.rs$
         args: []
-        # 对安装的依赖进行安全检测（依赖变更发生在 Cargo.toml/lock，而非 .rs 文件）
+        # dependency audit (dependency changes land in Cargo.toml/lock, not in .rs files)
       - id: cargo-deny
         name: cargo deny check
         description: Check cargo dependencies
@@ -35,14 +33,14 @@ repos:
         language: system
         files: (Cargo\.(toml|lock)|deny\.toml)$
         pass_filenames: false
-        # typos 检测.
+        # spell check
       - id: typos
         name: typos
         description: check typo
         entry: bash -c 'typos'
         language: system
         pass_filenames: false
-        # Rust代码语法检测.
+        # compile check
       - id: cargo-check
         name: cargo check
         description: Check the package for errors.
@@ -50,7 +48,7 @@ repos:
         language: system
         files: (\.rs|Cargo\.(toml|lock))$
         pass_filenames: false
-        # lint 检测
+        # lints
       - id: cargo-clippy
         name: cargo clippy
         description: Lint rust sources
@@ -58,7 +56,7 @@ repos:
         language: system
         files: (\.rs|Cargo\.(toml|lock))$
         pass_filenames: false
-        # 执行单元测试
+        # unit and integration tests
       - id: cargo-test
         name: cargo test
         description: unit test for the project

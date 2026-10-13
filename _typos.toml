@@ -1,11 +1,11 @@
-# typos 检测配置
-# typos 主要用于检测一些单词的拼写是否正确.
+# typos configuration.
+# typos flags commonly misspelled words in source code and documentation.
 
 [default.extend-words]
 ratatui = "ratatui"
-# RFC 4648 的 base64 标准测试向量(src/ui/mod.rs)
+# test vector from RFC 4648 (base64), see src/ui/mod.rs
 fo = "fo"
 
 [files]
-# 过滤不需要检测的文件.
+# files that are not checked
 extend-exclude = ["CHANGELOG.md"]
