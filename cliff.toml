@@ -6,10 +6,10 @@
 #       git cliff --unreleased --strip header      # what the next release will contain
 #       git cliff --latest --strip header          # notes of the latest release
 #
-# Offline by design: every link below is built from the hard-coded repository URL.
-# Do NOT reference `remote.github.*` in the template or export GITHUB_REPO — git-cliff
-# would then query the GitHub API (network, rate limits) just to learn the repo name,
-# and renders nothing at all when that call fails.
+# Links are built from `remote.github.*`, so git-cliff queries the GitHub API: it needs
+# network access, and a GITHUB_TOKEN to stay clear of the anonymous rate limit
+# (release.yml provides one). The repository is taken from the `origin` remote, or from
+# GITHUB_REPO=owner/repo.
 
 [changelog]
 header = """
@@ -19,7 +19,7 @@ All notable changes to this project will be documented in this file. See [conven
 # https://keats.github.io/tera/docs/#introduction
 body = """
 {%- macro remote_url() -%}
-  https://github.com/zlx2019/git-pincer
+  https://github.com/{{ remote.github.owner }}/{{ remote.github.repo }}
 {%- endmacro -%}
 ---
 {% if version %}\
@@ -43,7 +43,7 @@ body = """
     {%- for commit in commits %}
         {%- if commit.scope -%}
         {% else -%}
-            - {% if commit.breaking %} [**breaking**]{% endif %}\
+            - {% if commit.breaking %}[**breaking**] {% endif %}\
                 {{ commit.message|trim }} - ([{{ commit.id | truncate(length=7, end="") }}]({{ self::remote_url() }}/commit/{{ commit.id }})) - {{ commit.author.name }}
         {% endif -%}
     {% endfor -%}
@@ -71,8 +71,7 @@ commit_preprocessors = [
     { pattern = '(?s)^(Revert "[^\n]*")\n.*', replace = "${1}" },
 ]
 # Rules are tried top to bottom and the first match wins, so order matters:
-# skip rules, then Security (it must come before the type rules to be reachable),
-# then the commit types, then the catch-all.
+# skip rules, then the commit types, then the catch-all.
 #
 # The `<!-- NN -->` prefix fixes the section order (groups sort by their raw value;
 # the body template strips it with `striptags` before rendering).
@@ -89,23 +88,21 @@ commit_parsers = [
     { message = "^chore\\(version\\):", skip = true },
     { message = "^docs?(\\([^)]*\\))?: .*changelog", skip = true },
     # --- grouped -----------------------------------------------------------------
-    # Security: the `(security)` scope, or an advisory id (CVE / GHSA / RUSTSEC) in
-    # the subject. Matched on the subject because bodies can't be matched reliably.
-    { message = "^[a-z]+\\(security\\)!?:", group = "<!-- 02 -->🛡️ Security" },
-    { message = "^[a-z]+(\\([^)]*\\))?!?: .*\\b(CVE-[0-9]{4}-[0-9]+|GHSA-[0-9a-z-]+|RUSTSEC-[0-9]{4}-[0-9]+)\\b", group = "<!-- 02 -->🛡️ Security" },
-    { message = "^feat", group = "<!-- 00 -->🚀 Features" },
-    { message = "^fix", group = "<!-- 01 -->🐛 Bug Fixes" },
-    { message = "^perf", group = "<!-- 03 -->⚡ Performance" },
-    { message = "^refactor", group = "<!-- 04 -->🚜 Refactoring" },
-    { message = "^doc", group = "<!-- 05 -->📚 Documentation" },
-    { message = "^style", group = "<!-- 06 -->🎨 Style" },
-    { message = "^test", group = "<!-- 07 -->🧪 Tests" },
-    { message = "^build", group = "<!-- 08 -->📦 Build System" },
-    { message = "^ci", group = "<!-- 09 -->🤖 Continuous Integration" },
-    { message = "^chore", group = "<!-- 10 -->⚙️ Miscellaneous Chores" },
+    # The type rules require the full `type(scope)!:` shape, so a subject that merely
+    # starts with the word ("feat add x", "fixes the typo") falls through to Other.
+    { message = "^feat(\\([^)]*\\))?!?:", group = "<!-- 00 -->🚀 Features" },
+    { message = "^fix(\\([^)]*\\))?!?:", group = "<!-- 01 -->🐛 Bug Fixes" },
+    { message = "^perf(\\([^)]*\\))?!?:", group = "<!-- 02 -->⚡ Performance" },
+    { message = "^refactor(\\([^)]*\\))?!?:", group = "<!-- 03 -->🚜 Refactoring" },
+    { message = "^docs?(\\([^)]*\\))?!?:", group = "<!-- 04 -->📚 Documentation" },
+    { message = "^style(\\([^)]*\\))?!?:", group = "<!-- 05 -->🎨 Style" },
+    { message = "^test(\\([^)]*\\))?!?:", group = "<!-- 06 -->🧪 Tests" },
+    { message = "^build(\\([^)]*\\))?!?:", group = "<!-- 07 -->📦 Build System" },
+    { message = "^ci(\\([^)]*\\))?!?:", group = "<!-- 08 -->🤖 Continuous Integration" },
+    { message = "^chore(\\([^)]*\\))?!?:", group = "<!-- 09 -->⚙️ Miscellaneous Chores" },
     # `git revert` titles its commits `Revert "..."`
-    { message = "^[Rr]evert", group = "<!-- 11 -->◀️ Revert" },
-    { message = ".*", group = "<!-- 12 -->💼 Other" },
+    { message = "^[Rr]evert", group = "<!-- 10 -->◀️ Revert" },
+    { message = ".*", group = "<!-- 11 -->💼 Other" },
 ]
 # a breaking change is never hidden by a skip rule above
 protect_breaking_commits = true
