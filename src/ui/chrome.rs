@@ -10,6 +10,7 @@ use ratatui::widgets::{Block, BorderType, Clear, Paragraph};
 use crate::app::{FileEntry, Session, Side};
 
 use super::UiState;
+use super::keymap::{Action, key_hint};
 use super::panes::draw_columns;
 use super::theme::Theme;
 
@@ -160,11 +161,13 @@ fn draw_binary(
         Constraint::Fill(1),
     ])
     .areas(cards);
+    // 按键标签取自生效绑定表,改绑后与实际分发保持一致
+    let (left_key, right_key) = (key_hint(Action::TakeLocal), key_hint(Action::TakeRemote));
     binary_card(
         frame,
         left,
         " LOCAL ",
-        "h",
+        &left_key,
         ours,
         choice == Some(Side::Ours),
         theme,
@@ -173,18 +176,23 @@ fn draw_binary(
         frame,
         right,
         " REMOTE ",
-        "l",
+        &right_key,
         theirs,
         choice == Some(Side::Theirs),
         theme,
     );
 
+    let keys = tr_f(
+        "ui.binary_keys",
+        &[
+            ("left", &left_key),
+            ("right", &right_key),
+            ("undo", &key_hint(Action::UndoChunk)),
+            ("write", &key_hint(Action::WriteFile)),
+        ],
+    );
     frame.render_widget(
-        Paragraph::new(Line::styled(
-            tr("ui.binary_keys"),
-            Style::new().fg(theme.fg_dim),
-        ))
-        .centered(),
+        Paragraph::new(Line::styled(keys, Style::new().fg(theme.fg_dim))).centered(),
         hint,
     );
 }
@@ -515,5 +523,8 @@ mod tests {
             .unwrap();
         let content = format!("{:?}", terminal.backend().buffer());
         assert!(content.contains("logo.png"));
+        // 按键说明由生效绑定表代入(未改绑时为默认键位)
+        assert!(content.contains("press h to choose"));
+        assert!(content.contains("h / l choose · u undo · then w to write"));
     }
 }

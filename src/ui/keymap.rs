@@ -545,6 +545,22 @@ fn group(id: Action) -> Option<&'static EffectiveBinding> {
     effective().iter().find(|b| b.id == id)
 }
 
+/// 某个动作首个生效键位的紧凑标签,供界面内联的按键说明使用
+/// (如二选一卡片),改绑后自动跟随配置。
+pub(crate) fn key_hint(action: Action) -> String {
+    key_hint_in(effective(), action)
+}
+
+/// 在指定表中取动作的首个键位标签(key_hint 的纯逻辑部分,便于测试覆盖表)。
+fn key_hint_in(table: &[EffectiveBinding], action: Action) -> String {
+    table
+        .iter()
+        .flat_map(|b| &b.keys)
+        .find(|(_, _, a)| *a == action)
+        .map(|(code, mods, _)| key_display(*code, *mods, true))
+        .unwrap_or_default()
+}
+
 /// 提示条条目:(紧凑按键标签, 文案 i18n key),按展示顺序。
 pub(crate) fn hint_entries() -> impl Iterator<Item = (&'static str, &'static str)> {
     HINT_LAYOUT.iter().filter_map(|id| {
@@ -728,6 +744,24 @@ mod tests {
         );
         let undo = table.iter().find(|b| b.id == Action::UndoChunk).unwrap();
         assert_eq!(undo.label, "ctrl+z / U");
+    }
+
+    /// 内联按键说明取动作自身的首个键位,改绑后跟随配置
+    #[test]
+    fn key_hint_follows_overrides() {
+        let defaults = default_table();
+        assert_eq!(key_hint_in(&defaults, Action::TakeLocal), "h");
+        assert_eq!(key_hint_in(&defaults, Action::TakeRemote), "l");
+        // 同组的 U 属于 UndoFile,不混入 UndoChunk 的标签
+        assert_eq!(key_hint_in(&defaults, Action::UndoChunk), "u");
+
+        let overrides = HashMap::from([
+            ("take-local".to_owned(), "o".to_owned()),
+            ("write".to_owned(), "ctrl+s".to_owned()),
+        ]);
+        let table = build(&overrides).unwrap();
+        assert_eq!(key_hint_in(&table, Action::TakeLocal), "o");
+        assert_eq!(key_hint_in(&table, Action::WriteFile), "ctrl+s");
     }
 
     /// 覆盖冲突与非法输入给出可读错误
