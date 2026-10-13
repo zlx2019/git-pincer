@@ -71,8 +71,7 @@ commit_preprocessors = [
     { pattern = '(?s)^(Revert "[^\n]*")\n.*', replace = "${1}" },
 ]
 # Rules are tried top to bottom and the first match wins, so order matters:
-# skip rules, then Security (it must come before the type rules to be reachable),
-# then the commit types, then the catch-all.
+# skip rules, then the commit types, then the catch-all.
 #
 # The `<!-- NN -->` prefix fixes the section order (groups sort by their raw value;
 # the body template strips it with `striptags` before rendering).
@@ -89,23 +88,19 @@ commit_parsers = [
     { message = "^chore\\(version\\):", skip = true },
     { message = "^docs?(\\([^)]*\\))?: .*changelog", skip = true },
     # --- grouped -----------------------------------------------------------------
-    # Security: the `(security)` scope, or an advisory id (CVE / GHSA / RUSTSEC) in
-    # the subject. Matched on the subject because bodies can't be matched reliably.
-    { message = "^[a-z]+\\(security\\)!?:", group = "<!-- 02 -->🛡️ Security" },
-    { message = "^[a-z]+(\\([^)]*\\))?!?: .*\\b(CVE-[0-9]{4}-[0-9]+|GHSA-[0-9a-z-]+|RUSTSEC-[0-9]{4}-[0-9]+)\\b", group = "<!-- 02 -->🛡️ Security" },
     { message = "^feat", group = "<!-- 00 -->🚀 Features" },
     { message = "^fix", group = "<!-- 01 -->🐛 Bug Fixes" },
-    { message = "^perf", group = "<!-- 03 -->⚡ Performance" },
-    { message = "^refactor", group = "<!-- 04 -->🚜 Refactoring" },
-    { message = "^doc", group = "<!-- 05 -->📚 Documentation" },
-    { message = "^style", group = "<!-- 06 -->🎨 Style" },
-    { message = "^test", group = "<!-- 07 -->🧪 Tests" },
-    { message = "^build", group = "<!-- 08 -->📦 Build System" },
-    { message = "^ci", group = "<!-- 09 -->🤖 Continuous Integration" },
-    { message = "^chore", group = "<!-- 10 -->⚙️ Miscellaneous Chores" },
+    { message = "^perf", group = "<!-- 02 -->⚡ Performance" },
+    { message = "^refactor", group = "<!-- 03 -->🚜 Refactoring" },
+    { message = "^doc", group = "<!-- 04 -->📚 Documentation" },
+    { message = "^style", group = "<!-- 05 -->🎨 Style" },
+    { message = "^test", group = "<!-- 06 -->🧪 Tests" },
+    { message = "^build", group = "<!-- 07 -->📦 Build System" },
+    { message = "^ci", group = "<!-- 08 -->🤖 Continuous Integration" },
+    { message = "^chore", group = "<!-- 09 -->⚙️ Miscellaneous Chores" },
     # `git revert` titles its commits `Revert "..."`
-    { message = "^[Rr]evert", group = "<!-- 11 -->◀️ Revert" },
-    { message = ".*", group = "<!-- 12 -->💼 Other" },
+    { message = "^[Rr]evert", group = "<!-- 10 -->◀️ Revert" },
+    { message = ".*", group = "<!-- 11 -->💼 Other" },
 ]
 # a breaking change is never hidden by a skip rule above
 protect_breaking_commits = true
