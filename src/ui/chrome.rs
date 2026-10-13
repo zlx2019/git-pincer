@@ -5,7 +5,7 @@ use ratatui::Frame;
 use ratatui::layout::{Constraint, Layout, Rect};
 use ratatui::style::{Modifier, Style};
 use ratatui::text::{Line, Span};
-use ratatui::widgets::{Block, BorderType, Clear, Paragraph};
+use ratatui::widgets::{Block, BorderType, Clear, Paragraph, Wrap};
 
 use crate::app::{FileEntry, Session, Side};
 
@@ -138,7 +138,8 @@ fn draw_binary(
     theme: &Theme,
 ) {
     let panel = centered_rect(area, 64, 11);
-    let [notice, _, cards, _, hint] = Layout::vertical([
+    let [title, notice, _, cards, _, hint] = Layout::vertical([
+        Constraint::Length(1),
         Constraint::Length(2),
         Constraint::Length(1),
         Constraint::Length(5),
@@ -148,10 +149,17 @@ fn draw_binary(
     .areas(panel);
 
     frame.render_widget(
-        Paragraph::new(vec![
+        Paragraph::new(
             Line::styled(path.to_owned(), Style::new().add_modifier(Modifier::BOLD)).centered(),
+        ),
+        title,
+    );
+    // 说明文案可能宽于面板(如英文),换行展示而非截断句尾
+    frame.render_widget(
+        Paragraph::new(
             Line::styled(tr("ui.binary_notice"), Style::new().fg(theme.amber)).centered(),
-        ]),
+        )
+        .wrap(Wrap { trim: true }),
         notice,
     );
 
@@ -526,5 +534,26 @@ mod tests {
         // 按键说明由生效绑定表代入(未改绑时为默认键位)
         assert!(content.contains("press h to choose"));
         assert!(content.contains("h / l choose · u undo · then w to write"));
+    }
+
+    /// 说明文案宽于面板(英文 71 列 > 64 列)时换行展示,不截断句尾
+    #[test]
+    fn binary_notice_wraps_instead_of_clipping() {
+        let mut session = Session::new(
+            vec![FileEntry::Binary {
+                path: "logo.png".to_owned(),
+                ours: vec![0, 1],
+                theirs: vec![2, 3],
+                choice: None,
+            }],
+            "merge".to_owned(),
+        );
+        let mut terminal = Terminal::new(TestBackend::new(100, 20)).unwrap();
+        terminal
+            .draw(|frame| draw(frame, &mut session, &mut UiState::default()))
+            .unwrap();
+        let content = format!("{:?}", terminal.backend().buffer());
+        assert!(content.contains("choose one side as"));
+        assert!(content.contains("a whole"), "说明文案句尾被截断");
     }
 }
