@@ -60,4 +60,4 @@ jobs:
     steps:
       - uses: actions/checkout@v4
       # pinned so upstream changes can't break CI unexpectedly (dependabot bumps it periodically)
-      - uses: crate-ci/typos@v1.48.0
+      - uses: crate-ci/typos@v1.51.1
