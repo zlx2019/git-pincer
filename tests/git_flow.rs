@@ -12,6 +12,8 @@
 use std::path::PathBuf;
 use std::process::Command;
 
+use git_pincer::app::{FileEntry, PickKind, Side};
+use git_pincer::commands::resolve::{build_session, persist};
 use git_pincer::git::{Git, GitError, RepoState};
 
 /// 临时 git 仓库守卫:Drop 时清理目录。
@@ -139,7 +141,8 @@ fn reads_three_stages() {
     let f = &files[0];
     let oids: Vec<&str> = [&f.base, &f.ours, &f.theirs]
         .into_iter()
-        .filter_map(|o| o.as_deref())
+        .flatten()
+        .map(|stage| stage.oid.as_str())
         .collect();
     let blobs = git.read_blobs(&oids).unwrap();
     assert_eq!(blobs.len(), 3);
@@ -479,4 +482,146 @@ fn launch_captured_reports_failure_without_bailing() {
         git_pincer::commands::run::LaunchOutcome::Failed(reason) => assert!(!reason.is_empty()),
         other => panic!("无远程仓库的 pull 应返回 Failed,实际为 {other:?}"),
     }
+}
+
+/// 按真实编排路径解决首个冲突文件(须已降级为二选一):构建会话 → 选边 → 落盘,
+/// 返回会话中的条目供断言。
+fn resolve_first_by_pick(git: &Git, side: Side) -> FileEntry {
+    let files = git.conflicted_files().unwrap();
+    let mut session = build_session(git, &files, true).unwrap();
+    let mut entry = session.files.remove(0);
+    let FileEntry::Pick { choice, .. } = &mut entry else {
+        panic!("应降级为二选一条目,实际为 {entry:?}");
+    };
+    *choice = Some(side);
+    persist(git, &files, &entry).unwrap();
+    entry
+}
+
+/// 二进制冲突整文件二选一:取远端后写入远端内容并完成暂存
+#[test]
+fn binary_conflict_is_picked_whole() {
+    let repo = TempRepo::new("binary");
+    repo.write("img.bin", "BIN\0base");
+    repo.commit_all("init");
+    repo.git(&["checkout", "-b", "feature"]);
+    repo.write("img.bin", "BIN\0theirs");
+    repo.commit_all("feature change");
+    repo.git(&["checkout", "main"]);
+    repo.write("img.bin", "BIN\0ours");
+    repo.commit_all("main change");
+    assert!(!repo.git_allow_fail(&["merge", "--no-edit", "feature"]));
+
+    let git = Git::discover(&repo.dir, false).unwrap();
+    let entry = resolve_first_by_pick(&git, Side::Theirs);
+    assert!(matches!(
+        entry,
+        FileEntry::Pick {
+            kind: PickKind::File,
+            ..
+        }
+    ));
+    assert_eq!(
+        std::fs::read(repo.dir.join("img.bin")).unwrap(),
+        b"BIN\0theirs"
+    );
+    assert!(git.conflicted_files().unwrap().is_empty());
+}
+
+/// 把工作区的符号链接改指向 target。
+#[cfg(unix)]
+fn relink(repo: &TempRepo, name: &str, target: &str) {
+    let link = repo.dir.join(name);
+    let _ = std::fs::remove_file(&link);
+    std::os::unix::fs::symlink(target, link).unwrap();
+}
+
+/// 符号链接冲突:取远端后链接改指向远端目标,本地链接原先指向的文件
+/// 不被写穿,暂存的仍是符号链接
+#[cfg(unix)]
+#[test]
+fn symlink_conflict_is_picked_without_writing_through() {
+    let repo = TempRepo::new("symlink");
+    repo.write("b.txt", "ours-target\n");
+    repo.write("c.txt", "theirs-target\n");
+    relink(&repo, "link", "a.txt");
+    repo.commit_all("init");
+    repo.git(&["checkout", "-b", "feature"]);
+    relink(&repo, "link", "c.txt");
+    repo.commit_all("feature relink");
+    repo.git(&["checkout", "main"]);
+    relink(&repo, "link", "b.txt");
+    repo.commit_all("main relink");
+    assert!(!repo.git_allow_fail(&["merge", "--no-edit", "feature"]));
+
+    let git = Git::discover(&repo.dir, false).unwrap();
+    let entry = resolve_first_by_pick(&git, Side::Theirs);
+    let FileEntry::Pick {
+        kind, ours, theirs, ..
+    } = entry
+    else {
+        unreachable!()
+    };
+    assert_eq!(kind, PickKind::Symlink);
+    assert_eq!(
+        (ours.unwrap(), theirs.unwrap()),
+        (b"b.txt".to_vec(), b"c.txt".to_vec())
+    );
+
+    let link = std::fs::read_link(repo.dir.join("link")).unwrap();
+    assert_eq!(link, PathBuf::from("c.txt"));
+    let b = std::fs::read_to_string(repo.dir.join("b.txt")).unwrap();
+    assert_eq!(b, "ours-target\n", "链接目标被写穿");
+    assert!(repo.git(&["ls-files", "-s", "link"]).starts_with("120000"));
+    assert!(git.conflicted_files().unwrap().is_empty());
+    assert!(git.continue_op(RepoState::Merging).unwrap().success());
+}
+
+/// 符号链接修改 / 删除冲突取删除侧:删除链接本身,链接目标保持不变
+#[cfg(unix)]
+#[test]
+fn symlink_deleted_side_removes_only_the_link() {
+    let repo = TempRepo::new("symlink-del");
+    repo.write("b.txt", "target\n");
+    relink(&repo, "link", "a.txt");
+    repo.commit_all("init");
+    repo.git(&["checkout", "-b", "feature"]);
+    repo.git(&["rm", "-q", "link"]);
+    repo.commit_all("feature delete");
+    repo.git(&["checkout", "main"]);
+    relink(&repo, "link", "b.txt");
+    repo.commit_all("main relink");
+    assert!(!repo.git_allow_fail(&["merge", "--no-edit", "feature"]));
+
+    let git = Git::discover(&repo.dir, false).unwrap();
+    let entry = resolve_first_by_pick(&git, Side::Theirs);
+    assert!(matches!(entry, FileEntry::Pick { theirs: None, .. }));
+
+    assert!(std::fs::symlink_metadata(repo.dir.join("link")).is_err());
+    let b = std::fs::read_to_string(repo.dir.join("b.txt")).unwrap();
+    assert_eq!(b, "target\n");
+    assert!(git.conflicted_files().unwrap().is_empty());
+    assert!(git.continue_op(RepoState::Merging).unwrap().success());
+    assert!(repo.git(&["ls-files", "link"]).is_empty());
+}
+
+/// 工作区路径是符号链接时,stage_resolved 替换链接本身而非写进链接目标
+#[cfg(unix)]
+#[test]
+fn stage_resolved_replaces_symlink_instead_of_following() {
+    let repo = conflicted_repo("symlink-guard");
+    repo.write("precious.txt", "precious\n");
+    relink(&repo, "config.toml", "precious.txt");
+
+    let git = Git::discover(&repo.dir, false).unwrap();
+    git.stage_resolved("config.toml", b"host = \"merged\"\n")
+        .unwrap();
+    let precious = std::fs::read_to_string(repo.dir.join("precious.txt")).unwrap();
+    assert_eq!(precious, "precious\n", "链接目标被写穿");
+    let config = repo.dir.join("config.toml");
+    assert!(std::fs::symlink_metadata(&config).unwrap().is_file());
+    assert_eq!(
+        std::fs::read_to_string(config).unwrap(),
+        "host = \"merged\"\n"
+    );
 }

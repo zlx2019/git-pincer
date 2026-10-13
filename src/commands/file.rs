@@ -33,8 +33,8 @@ pub fn run(args: FileArgs, light: bool) -> Result<()> {
 
     let outcome = ui::run_session(
         &mut session,
-        &mut |_path: &str, bytes: &[u8]| {
-            std::fs::write(&args.path, bytes)?;
+        &mut |entry: &FileEntry| {
+            std::fs::write(&args.path, entry.resolved_bytes())?;
             Ok(())
         },
         light,

@@ -1,11 +1,11 @@
 //! The shared conflict-resolution loop behind every entry point
 //! (bare invocation, merge / rebase / pull / cherry-pick / revert).
 
-use anyhow::{Result, bail};
+use anyhow::{Context, Result, bail};
 use ratatui::DefaultTerminal;
 
-use crate::app::{FileEntry, FileMerge, Session};
-use crate::git::{ConflictedFile, Git, RepoState};
+use crate::app::{FileEntry, FileMerge, PickKind, Session, Side};
+use crate::git::{ConflictedFile, Git, RepoState, Stage};
 use crate::i18n::{tr, tr_f};
 use crate::ui::{self, Outcome};
 
@@ -44,10 +44,7 @@ pub fn resolve_loop(git: &Git, light: bool) -> Result<()> {
         let mut session = build_session(git, &files, false)?;
         let outcome = ui::run_session(
             &mut session,
-            &mut |path: &str, bytes: &[u8]| {
-                git.stage_resolved(path, bytes)?;
-                Ok(())
-            },
+            &mut |entry: &FileEntry| persist(git, &files, entry),
             light,
         )?;
         if outcome == Outcome::Quit {
@@ -81,10 +78,7 @@ pub(crate) fn resolve_from_menu(
             Ok(mut session) => Some(ui::run_session_in(
                 terminal,
                 &mut session,
-                &mut |path: &str, bytes: &[u8]| {
-                    git.stage_resolved(path, bytes)?;
-                    Ok(())
-                },
+                &mut |entry: &FileEntry| persist(git, &files, entry),
                 light,
             )?),
             Err(e) => {
@@ -105,26 +99,49 @@ pub(crate) fn resolve_from_menu(
     resolve_loop(git, light)
 }
 
-/// 由冲突文件列表构建会话:读取三份 stage 内容,含 NUL 的按二进制降级处理。
+/// 落盘一个已解决的文件:符号链接经 git 整条取用所选一侧(检出而非写入,
+/// 不会写穿链接),其余写入解决结果并 `git add`。
+pub fn persist(git: &Git, files: &[ConflictedFile], entry: &FileEntry) -> Result<()> {
+    if let FileEntry::Pick {
+        path,
+        kind: PickKind::Symlink,
+        choice: Some(side),
+        ..
+    } = entry
+    {
+        let file = files
+            .iter()
+            .find(|f| f.path == *path)
+            .with_context(|| format!("{path} is not in the conflict list"))?;
+        let stage = match side {
+            Side::Ours => 2,
+            Side::Theirs => 3,
+        };
+        git.take_side(file, stage)?;
+    } else {
+        git.stage_resolved(entry.path(), &entry.resolved_bytes())?;
+    }
+    Ok(())
+}
+
+/// 由冲突文件列表构建会话:读取三份 stage 内容;符号链接与含 NUL 的
+/// 二进制文件不能逐块合并,降级为整条二选一。
 ///
 /// 全部 stage 的 blob 用一个 `git cat-file --batch` 进程按序批量读回,
 /// 避免逐文件逐 stage spawn 进程。`quiet` 抑制逐文件进度打印
 /// (菜单移交终端时 alternate screen 仍活跃,打印会破坏画面)。
-fn build_session(git: &Git, files: &[ConflictedFile], quiet: bool) -> Result<Session> {
+pub fn build_session(git: &Git, files: &[ConflictedFile], quiet: bool) -> Result<Session> {
     let state = git.state()?;
     let oids: Vec<&str> = files
         .iter()
-        .flat_map(|f| [f.base.as_deref(), f.ours.as_deref(), f.theirs.as_deref()])
+        .flat_map(|f| [&f.base, &f.ours, &f.theirs])
         .flatten()
+        .map(|stage| stage.oid.as_str())
         .collect();
     let mut blobs = git.read_blobs(&oids)?.into_iter();
-    // 应答与请求同序:缺失的 stage 不在请求中,取空内容
-    let mut take = |oid: &Option<String>| -> Vec<u8> {
-        if oid.is_some() {
-            blobs.next().unwrap_or_default()
-        } else {
-            Vec::new()
-        }
+    // 应答与请求同序:缺失的 stage 不在请求中,取 None
+    let mut take = |stage: &Option<Stage>| -> Option<Vec<u8>> {
+        stage.as_ref().map(|_| blobs.next().unwrap_or_default())
     };
 
     let mut entries = Vec::new();
@@ -145,16 +162,34 @@ fn build_session(git: &Git, files: &[ConflictedFile], quiet: bool) -> Result<Ses
         let base = take(&file.base);
         let ours = take(&file.ours);
         let theirs = take(&file.theirs);
-        if base.contains(&0) || ours.contains(&0) || theirs.contains(&0) {
-            entries.push(FileEntry::Binary {
-                path: file.path.clone(),
+        let path = file.path.clone();
+        // 符号链接:链接目标不能按文本合并,写盘也不能经文件系统(会写穿链接)
+        if file.is_symlink() {
+            entries.push(FileEntry::Pick {
+                path,
+                kind: PickKind::Symlink,
                 ours,
                 theirs,
                 choice: None,
             });
+            continue;
+        }
+        let (base, ours, theirs) = (
+            base.unwrap_or_default(),
+            ours.unwrap_or_default(),
+            theirs.unwrap_or_default(),
+        );
+        if base.contains(&0) || ours.contains(&0) || theirs.contains(&0) {
+            entries.push(FileEntry::Pick {
+                path,
+                kind: PickKind::File,
+                ours: Some(ours),
+                theirs: Some(theirs),
+                choice: None,
+            });
         } else {
             entries.push(FileEntry::Text(FileMerge::from_three_way(
-                file.path.clone(),
+                path,
                 &String::from_utf8_lossy(&base),
                 &String::from_utf8_lossy(&ours),
                 &String::from_utf8_lossy(&theirs),

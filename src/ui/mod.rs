@@ -73,11 +73,12 @@ pub struct UiState {
 
 /// 运行交互会话直至完成或退出。
 ///
-/// `write_file` 负责把解决后的字节落盘(git 模式下还会顺带 `git add`);
-/// `light` 为 true 时使用浅色主题(适配浅色终端背景)。
+/// `write_file` 负责把解决后的文件落盘(git 模式下还会顺带 `git add`;
+/// 二选一条目由调用方决定落盘方式);`light` 为 true 时使用浅色主题
+/// (适配浅色终端背景)。
 pub fn run_session(
     session: &mut Session,
-    write_file: &mut dyn FnMut(&str, &[u8]) -> Result<()>,
+    write_file: &mut dyn FnMut(&FileEntry) -> Result<()>,
     light: bool,
 ) -> Result<Outcome> {
     // ratatui::init 在无 TTY 时会直接 panic,这里先行拦截给出可读错误
@@ -96,7 +97,7 @@ pub fn run_session(
 pub(crate) fn run_session_in(
     mut terminal: DefaultTerminal,
     session: &mut Session,
-    write_file: &mut dyn FnMut(&str, &[u8]) -> Result<()>,
+    write_file: &mut dyn FnMut(&FileEntry) -> Result<()>,
     light: bool,
 ) -> Result<Outcome> {
     let result = event_loop(&mut terminal, session, write_file, light);
@@ -108,7 +109,7 @@ pub(crate) fn run_session_in(
 fn event_loop(
     terminal: &mut DefaultTerminal,
     session: &mut Session,
-    write_file: &mut dyn FnMut(&str, &[u8]) -> Result<()>,
+    write_file: &mut dyn FnMut(&FileEntry) -> Result<()>,
     light: bool,
 ) -> Result<Outcome> {
     let mut ui = UiState {
@@ -270,7 +271,7 @@ fn handle_file_key(session: &mut Session, action: Action, ui: &mut UiState) -> b
                 _ => false,
             }
         }
-        FileEntry::Binary { choice, .. } => {
+        FileEntry::Pick { choice, .. } => {
             match action {
                 Action::TakeLocal => *choice = Some(Side::Ours),
                 Action::TakeRemote => *choice = Some(Side::Theirs),
@@ -364,7 +365,7 @@ fn base64(data: &[u8]) -> String {
 /// 否则按 base 写盘会悄悄丢掉 git 已合并进来的对侧改动。
 fn write_current(
     session: &mut Session,
-    write_file: &mut dyn FnMut(&str, &[u8]) -> Result<()>,
+    write_file: &mut dyn FnMut(&FileEntry) -> Result<()>,
     ui: &mut UiState,
 ) -> Result<bool> {
     if !session.current_file().ready_to_write() {
@@ -378,7 +379,7 @@ fn write_current(
     }
     let entry = session.current_file();
     let path = entry.path().to_owned();
-    write_file(&path, &entry.resolved_bytes())?;
+    write_file(entry)?;
     session.mark_written();
     ui.message = if auto_applied > 0 {
         tr_f(
@@ -549,8 +550,8 @@ mod tests {
         let mut ui = UiState::default();
         let ok = write_current(
             &mut session,
-            &mut |_path, bytes| {
-                written = bytes.to_vec();
+            &mut |entry| {
+                written = entry.resolved_bytes();
                 Ok(())
             },
             &mut ui,
