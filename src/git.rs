@@ -63,20 +63,56 @@ impl RepoState {
     }
 }
 
+/// 符号链接在 index 中的 mode。
+const MODE_SYMLINK: u32 = 0o120000;
+/// 子模块(gitlink)在 index 中的 mode。
+const MODE_GITLINK: u32 = 0o160000;
+
+/// 冲突文件某个 stage 在 index 中的条目。
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct Stage {
+    /// 文件 mode(如 0o100644 普通文件、0o120000 符号链接、0o160000 子模块)
+    pub mode: u32,
+    /// 对象 id:普通文件与符号链接为 blob,子模块为其提交
+    pub oid: String,
+}
+
 /// 一个处于冲突状态的文件及其在 index 中的 stage 分布。
 ///
-/// 各 stage 记录 blob oid(缺失该 stage 时为 None),
+/// 各 stage 记录 mode 与 oid(缺失该 stage 时为 None),
 /// 供 [`Git::read_blobs`] 单进程批量读取内容。
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct ConflictedFile {
     /// 相对仓库根目录的路径
     pub path: String,
-    /// stage 1(base)的 blob oid;add/add 冲突时缺失
-    pub base: Option<String>,
-    /// stage 2(ours)的 blob oid;对方删除本方修改时才缺失本方
-    pub ours: Option<String>,
-    /// stage 3(theirs)的 blob oid
-    pub theirs: Option<String>,
+    /// stage 1(base);add/add 冲突时缺失
+    pub base: Option<Stage>,
+    /// stage 2(ours);本方删除了该文件时缺失
+    pub ours: Option<Stage>,
+    /// stage 3(theirs);对方删除了该文件时缺失
+    pub theirs: Option<Stage>,
+}
+
+impl ConflictedFile {
+    /// 是否涉及符号链接(任一 stage 为链接):链接目标不能按文本合并,
+    /// 也不能经文件系统写入(会写穿到链接指向的文件),只能整条取用一侧。
+    pub fn is_symlink(&self) -> bool {
+        self.has_mode(MODE_SYMLINK)
+    }
+
+    /// 是否涉及子模块(任一 stage 为 gitlink):其提交在子模块仓库而非本仓库
+    /// 的对象库中,无法读取内容,只能整条取用一侧记录的提交。
+    pub fn is_submodule(&self) -> bool {
+        self.has_mode(MODE_GITLINK)
+    }
+
+    /// 是否有任一 stage 为指定 mode。
+    fn has_mode(&self, mode: u32) -> bool {
+        [&self.base, &self.ours, &self.theirs]
+            .into_iter()
+            .flatten()
+            .any(|stage| stage.mode == mode)
+    }
 }
 
 /// 仓库体征:主菜单 RPG 状态面板展示的数据,打开菜单时查询一次。
@@ -437,8 +473,58 @@ impl Git {
 
     /// 将解决后的内容写入工作区文件并 `git add`。
     pub fn stage_resolved(&self, path: &str, content: &[u8]) -> Result<(), GitError> {
-        std::fs::write(self.top.join(path), content)?;
-        self.run_ok(&["add", "--", path])?;
+        let full = self.top.join(path);
+        // 工作区路径是符号链接时先删除链接本身:fs::write 会跟随链接,
+        // 把内容写进链接指向的文件(可能在仓库之外)
+        if std::fs::symlink_metadata(&full).is_ok_and(|meta| meta.file_type().is_symlink()) {
+            std::fs::remove_file(&full)?;
+        }
+        std::fs::write(&full, content)?;
+        self.add_path(path)
+    }
+
+    /// 整条取用冲突文件的某一侧(`stage` 为 2 本地 / 3 远端),用于不能按内容
+    /// 合并、也不能经文件系统写入的冲突(符号链接 / 子模块),做法与 git mergetool 一致:
+    /// - 子模块:只改 index(`update-index`),不动子模块工作区(其中可能有未推送的提交)
+    /// - 其余:该侧存在时 `checkout-index -f` 检出该侧再 `git add`(git 先删除旧路径
+    ///   再创建,不会写穿链接,并遵循 core.symlinks);该侧已删除时 `git rm`
+    pub fn take_side(&self, file: &ConflictedFile, stage: u8) -> Result<(), GitError> {
+        let chosen = match stage {
+            2 => &file.ours,
+            3 => &file.theirs,
+            other => {
+                return Err(GitError::Failed {
+                    cmd: format!("checkout-index --stage={other}"),
+                    stderr: "stage must be 2 (ours) or 3 (theirs)".to_owned(),
+                });
+            }
+        };
+        let path = file.path.as_str();
+        if file.is_submodule() {
+            match chosen {
+                Some(entry) => {
+                    let info = format!("{:o},{},{path}", entry.mode, entry.oid);
+                    self.run_ok(&["update-index", "--cacheinfo", &info])?;
+                }
+                None => {
+                    self.run_ok(&["update-index", "--force-remove", "--", path])?;
+                }
+            }
+            return Ok(());
+        }
+        if chosen.is_none() {
+            self.run_ok(&["--literal-pathspecs", "rm", "-q", "--", path])?;
+            return Ok(());
+        }
+        let stage_arg = format!("--stage={stage}");
+        self.run_ok(&["checkout-index", "-f", &stage_arg, "--", path])?;
+        self.add_path(path)
+    }
+
+    /// 按字面路径 `git add`:文件名可能含 `*` `?` `[` 等 glob 字符,按 pathspec
+    /// 解析会把匹配到的其他文件(含未跟踪文件)一并暂存进合并提交。
+    fn add_path(&self, path: &str) -> Result<(), GitError> {
+        self.run_ok(&["--literal-pathspecs", "add", "--", path])?;
         Ok(())
     }
 
@@ -485,8 +571,12 @@ fn parse_ls_files_unmerged(text: &str) -> Vec<ConflictedFile> {
         let Some((meta, path)) = entry.split_once('\t') else {
             continue;
         };
-        let mut fields = meta.split_whitespace().skip(1);
-        let (Some(oid), Some(stage)) = (fields.next(), fields.next()) else {
+        let mut fields = meta.split_whitespace();
+        let (Some(mode), Some(oid), Some(stage)) = (fields.next(), fields.next(), fields.next())
+        else {
+            continue;
+        };
+        let Ok(mode) = u32::from_str_radix(mode, 8) else {
             continue;
         };
         let idx = match files.iter().position(|f| f.path == path) {
@@ -501,10 +591,14 @@ fn parse_ls_files_unmerged(text: &str) -> Vec<ConflictedFile> {
                 files.len() - 1
             }
         };
+        let entry = Some(Stage {
+            mode,
+            oid: oid.to_owned(),
+        });
         match stage {
-            "1" => files[idx].base = Some(oid.to_owned()),
-            "2" => files[idx].ours = Some(oid.to_owned()),
-            "3" => files[idx].theirs = Some(oid.to_owned()),
+            "1" => files[idx].base = entry,
+            "2" => files[idx].ours = entry,
+            "3" => files[idx].theirs = entry,
             _ => {}
         }
     }
@@ -515,6 +609,14 @@ fn parse_ls_files_unmerged(text: &str) -> Vec<ConflictedFile> {
 mod tests {
     use super::*;
 
+    /// 普通文件的 stage 条目
+    fn regular(oid: &str) -> Option<Stage> {
+        Some(Stage {
+            mode: 0o100644,
+            oid: oid.to_owned(),
+        })
+    }
+
     #[test]
     fn parses_unmerged_entries_grouped_by_path() {
         let text = "100644 aaaa 1\tsrc/a.rs\x00100644 bbbb 2\tsrc/a.rs\x00100644 cccc 3\tsrc/a.rs\x00100644 dddd 2\tREADME.md\x00100644 eeee 3\tREADME.md\x00";
@@ -524,14 +626,37 @@ mod tests {
             files[0],
             ConflictedFile {
                 path: "src/a.rs".to_owned(),
-                base: Some("aaaa".to_owned()),
-                ours: Some("bbbb".to_owned()),
-                theirs: Some("cccc".to_owned()),
+                base: regular("aaaa"),
+                ours: regular("bbbb"),
+                theirs: regular("cccc"),
             }
         );
+        assert!(!files[0].is_symlink());
         // add/add 冲突:没有 stage 1
         assert!(files[1].base.is_none());
         assert!(files[1].ours.is_some() && files[1].theirs.is_some());
+    }
+
+    /// mode 按八进制解析;任一 stage 为符号链接即视为链接冲突
+    /// (merge-ort 会把链接 ↔ 文件的类型变更拆成两个路径,链接一侧可能只剩单个 stage)
+    #[test]
+    fn detects_symlink_stages() {
+        let text = "120000 aaaa 1\tlink\x00120000 bbbb 2\tlink\x00120000 cccc 3\tlink\x00120000 dddd 2\tx\x00";
+        let files = parse_ls_files_unmerged(text);
+        assert_eq!(files[0].ours.as_ref().map(|s| s.mode), Some(MODE_SYMLINK));
+        assert!(files[0].is_symlink());
+        assert!(files[1].is_symlink() && files[1].theirs.is_none());
+        // mode 非法的条目被跳过
+        assert!(parse_ls_files_unmerged("12x000 aaaa 2\tbad\x00").is_empty());
+    }
+
+    /// 任一 stage 为 gitlink 即视为子模块冲突
+    #[test]
+    fn detects_submodule_stages() {
+        let text = "160000 aaaa 1\tsub\x00160000 bbbb 2\tsub\x00160000 cccc 3\tsub\x00";
+        let files = parse_ls_files_unmerged(text);
+        assert!(files[0].is_submodule() && !files[0].is_symlink());
+        assert_eq!(files[0].theirs.as_ref().map(|s| s.mode), Some(MODE_GITLINK));
     }
 
     #[test]

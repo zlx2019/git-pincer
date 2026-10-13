@@ -1,15 +1,16 @@
-//! 界面整体绘制:状态栏、提示条、消息条、帮助浮层与二进制视图。
+//! 界面整体绘制:状态栏、提示条、消息条、帮助浮层与二选一视图。
 
 use crate::i18n::{tr, tr_f};
 use ratatui::Frame;
 use ratatui::layout::{Constraint, Layout, Rect};
 use ratatui::style::{Modifier, Style};
 use ratatui::text::{Line, Span};
-use ratatui::widgets::{Block, BorderType, Clear, Paragraph};
+use ratatui::widgets::{Block, BorderType, Clear, Paragraph, Wrap};
 
-use crate::app::{FileEntry, Session, Side};
+use crate::app::{FileEntry, PickKind, Session, Side};
 
 use super::UiState;
+use super::keymap::{Action, key_hint};
 use super::panes::draw_columns;
 use super::theme::Theme;
 
@@ -43,14 +44,26 @@ pub fn draw(frame: &mut Frame, session: &mut Session, ui: &mut UiState) {
                 (&mut ui.scroll_request, &mut ui.hscroll_request),
             );
         }
-        FileEntry::Binary {
+        FileEntry::Pick {
             path,
+            kind,
             ours,
             theirs,
             choice,
-        } => draw_binary(frame, body, path, ours, theirs, *choice, &ui.theme),
+        } => draw_pick(
+            frame,
+            body,
+            path,
+            pick_notice(*kind, ours.is_none() || theirs.is_none()),
+            [
+                side_summary(*kind, ours.as_deref()),
+                side_summary(*kind, theirs.as_deref()),
+            ],
+            *choice,
+            &ui.theme,
+        ),
     }
-    // 二进制视图不消费滚动请求,统一清零避免残留到后续文本文件
+    // 二选一视图不消费滚动请求,统一清零避免残留到后续文本文件
     ui.scroll_request = 0;
     ui.hscroll_request = 0;
     draw_hints(frame, hints, &ui.theme);
@@ -68,7 +81,7 @@ fn draw_header(frame: &mut Frame, area: Rect, session: &Session, theme: &Theme) 
     let entry = session.current_file();
     let pending = match entry {
         FileEntry::Text(m) => m.pending_conflicts(),
-        FileEntry::Binary { choice, .. } => usize::from(choice.is_none()),
+        FileEntry::Pick { choice, .. } => usize::from(choice.is_none()),
     };
     let done = session.written.iter().filter(|&&w| w).count();
     let total = session.files.len();
@@ -126,18 +139,49 @@ fn draw_header(frame: &mut Frame, area: Rect, session: &Session, theme: &Theme) 
     frame.render_widget(Paragraph::new(Line::from(spans)), area);
 }
 
-/// 二进制文件的降级视图:LOCAL / REMOTE 两张卡片整文件二选一。
-fn draw_binary(
+/// 二选一视图顶部的说明:按对象类型说明为何不能逐块合并;
+/// 普通文件一侧被删除时说明为修改 / 删除冲突。
+fn pick_notice(kind: PickKind, has_deleted: bool) -> &'static str {
+    match kind {
+        PickKind::File if has_deleted => tr("ui.deleted_notice"),
+        PickKind::File => tr("ui.binary_notice"),
+        PickKind::Symlink => tr("ui.symlink_notice"),
+        PickKind::Submodule => tr("ui.submodule_notice"),
+    }
+}
+
+/// 卡片上一侧内容的摘要:已删除 / 链接目标 / 子模块提交 / 字节数。
+fn side_summary(kind: PickKind, content: Option<&[u8]>) -> String {
+    let Some(content) = content else {
+        return tr("ui.side_deleted").to_owned();
+    };
+    match kind {
+        PickKind::File => tr_f("ui.bytes", &[("n", &content.len().to_string())]),
+        PickKind::Symlink => tr_f(
+            "ui.link_target",
+            &[("target", &String::from_utf8_lossy(content))],
+        ),
+        PickKind::Submodule => {
+            // 提交 id 取前 7 位短格式,与 git log --oneline 一致
+            let id = String::from_utf8_lossy(content);
+            tr_f("ui.commit_id", &[("id", id.get(..7).unwrap_or(&id))])
+        }
+    }
+}
+
+/// 不能逐块合并的冲突的降级视图:LOCAL / REMOTE 两张卡片整条二选一。
+fn draw_pick(
     frame: &mut Frame,
     area: Rect,
     path: &str,
-    ours: &[u8],
-    theirs: &[u8],
+    notice: &str,
+    [ours, theirs]: [String; 2],
     choice: Option<Side>,
     theme: &Theme,
 ) {
     let panel = centered_rect(area, 64, 11);
-    let [notice, _, cards, _, hint] = Layout::vertical([
+    let [title, notice_area, _, cards, _, hint] = Layout::vertical([
+        Constraint::Length(1),
         Constraint::Length(2),
         Constraint::Length(1),
         Constraint::Length(5),
@@ -147,11 +191,16 @@ fn draw_binary(
     .areas(panel);
 
     frame.render_widget(
-        Paragraph::new(vec![
+        Paragraph::new(
             Line::styled(path.to_owned(), Style::new().add_modifier(Modifier::BOLD)).centered(),
-            Line::styled(tr("ui.binary_notice"), Style::new().fg(theme.amber)).centered(),
-        ]),
-        notice,
+        ),
+        title,
+    );
+    // 说明文案可能宽于面板(如英文),换行展示而非截断句尾
+    frame.render_widget(
+        Paragraph::new(Line::styled(notice, Style::new().fg(theme.amber)).centered())
+            .wrap(Wrap { trim: true }),
+        notice_area,
     );
 
     let [left, _, right] = Layout::horizontal([
@@ -160,42 +209,49 @@ fn draw_binary(
         Constraint::Fill(1),
     ])
     .areas(cards);
-    binary_card(
+    // 按键标签取自生效绑定表,改绑后与实际分发保持一致
+    let (left_key, right_key) = (key_hint(Action::TakeLocal), key_hint(Action::TakeRemote));
+    pick_card(
         frame,
         left,
         " LOCAL ",
-        "h",
-        ours,
+        &left_key,
+        &ours,
         choice == Some(Side::Ours),
         theme,
     );
-    binary_card(
+    pick_card(
         frame,
         right,
         " REMOTE ",
-        "l",
-        theirs,
+        &right_key,
+        &theirs,
         choice == Some(Side::Theirs),
         theme,
     );
 
+    let keys = tr_f(
+        "ui.binary_keys",
+        &[
+            ("left", &left_key),
+            ("right", &right_key),
+            ("undo", &key_hint(Action::UndoChunk)),
+            ("write", &key_hint(Action::WriteFile)),
+        ],
+    );
     frame.render_widget(
-        Paragraph::new(Line::styled(
-            tr("ui.binary_keys"),
-            Style::new().fg(theme.fg_dim),
-        ))
-        .centered(),
+        Paragraph::new(Line::styled(keys, Style::new().fg(theme.fg_dim))).centered(),
         hint,
     );
 }
 
-/// 单张二进制候选卡片:选中侧边框换绿色并在标题加 ✓。
-fn binary_card(
+/// 单张候选卡片:展示该侧内容摘要,选中侧边框换绿色并在标题加 ✓。
+fn pick_card(
     frame: &mut Frame,
     area: Rect,
     title: &str,
     key: &str,
-    bytes: &[u8],
+    summary: &str,
     selected: bool,
     theme: &Theme,
 ) {
@@ -217,11 +273,7 @@ fn binary_card(
     frame.render_widget(block, area);
     frame.render_widget(
         Paragraph::new(vec![
-            Line::styled(
-                tr_f("ui.bytes", &[("n", &bytes.len().to_string())]),
-                Style::new().fg(theme.fg_bright),
-            )
-            .centered(),
+            Line::styled(summary.to_owned(), Style::new().fg(theme.fg_bright)).centered(),
             Line::styled(
                 tr_f("ui.press_pick", &[("key", key)]),
                 Style::new().fg(theme.fg_dim),
@@ -425,7 +477,7 @@ mod tests {
         let mut terminal = Terminal::new(TestBackend::new(100, 24)).unwrap();
         let scroll_of = |s: &Session| match s.current_file() {
             FileEntry::Text(m) => (m.scroll, m.follow),
-            FileEntry::Binary { .. } => unreachable!(),
+            FileEntry::Pick { .. } => unreachable!(),
         };
 
         terminal.draw(|f| draw(f, &mut session, &mut ui)).unwrap();
@@ -469,7 +521,7 @@ mod tests {
         let mut terminal = Terminal::new(TestBackend::new(100, 24)).unwrap();
         let hscroll_of = |s: &Session| match s.current_file() {
             FileEntry::Text(m) => (m.hscroll, m.follow),
-            FileEntry::Binary { .. } => unreachable!(),
+            FileEntry::Pick { .. } => unreachable!(),
         };
 
         terminal.draw(|f| draw(f, &mut session, &mut ui)).unwrap();
@@ -496,24 +548,89 @@ mod tests {
         assert_eq!(hscroll_of(&session).0, 0);
     }
 
-    /// 二进制条目渲染不 panic
-    #[test]
-    fn draw_binary_entry_smoke() {
-        let mut session = Session::new(
-            vec![FileEntry::Binary {
-                path: "logo.png".to_owned(),
-                ours: vec![0, 1],
-                theirs: vec![2, 3],
-                choice: None,
-            }],
-            "merge".to_owned(),
-        );
-        let backend = TestBackend::new(100, 20);
-        let mut terminal = Terminal::new(backend).unwrap();
+    /// 二进制文件的二选一条目
+    fn binary_pick() -> FileEntry {
+        FileEntry::Pick {
+            path: "logo.png".to_owned(),
+            kind: PickKind::File,
+            ours: Some(vec![0, 1]),
+            theirs: Some(vec![2, 3]),
+            choice: None,
+        }
+    }
+
+    /// 用 TestBackend 渲染单个条目的一帧,返回缓冲区文本
+    fn render_entry(entry: FileEntry) -> String {
+        let mut session = Session::new(vec![entry], "merge".to_owned());
+        let mut terminal = Terminal::new(TestBackend::new(100, 20)).unwrap();
         terminal
             .draw(|frame| draw(frame, &mut session, &mut UiState::default()))
             .unwrap();
-        let content = format!("{:?}", terminal.backend().buffer());
+        format!("{:?}", terminal.backend().buffer())
+    }
+
+    /// 二进制条目渲染不 panic
+    #[test]
+    fn draw_binary_entry_smoke() {
+        let content = render_entry(binary_pick());
         assert!(content.contains("logo.png"));
+        assert!(content.contains("2 bytes"));
+        // 按键说明由生效绑定表代入(未改绑时为默认键位)
+        assert!(content.contains("press h to choose"));
+        assert!(content.contains("h / l choose · u undo · then w to write"));
+    }
+
+    /// 说明文案宽于面板(英文 71 列 > 64 列)时换行展示,不截断句尾
+    #[test]
+    fn binary_notice_wraps_instead_of_clipping() {
+        let content = render_entry(binary_pick());
+        assert!(content.contains("choose one side as"));
+        assert!(content.contains("a whole"), "说明文案句尾被截断");
+    }
+
+    /// 符号链接条目:卡片展示链接目标,已删除的一侧如实标注
+    #[test]
+    fn draw_symlink_entry_shows_targets() {
+        let content = render_entry(FileEntry::Pick {
+            path: "link".to_owned(),
+            kind: PickKind::Symlink,
+            ours: Some(b"b.txt".to_vec()),
+            theirs: None,
+            choice: None,
+        });
+        assert!(content.contains("Symlink"));
+        assert!(content.contains("→ b.txt"));
+        assert!(content.contains("(deleted)"));
+    }
+
+    /// 修改 / 删除冲突:说明改为修改-删除,删除侧卡片标注已删除
+    #[test]
+    fn draw_modify_delete_entry_explains_deletion() {
+        let content = render_entry(FileEntry::Pick {
+            path: "note.txt".to_owned(),
+            kind: PickKind::File,
+            ours: Some(b"a\nB\nc\n".to_vec()),
+            theirs: None,
+            choice: None,
+        });
+        assert!(content.contains("deleted it"));
+        assert!(!content.contains("Binary"));
+        assert!(content.contains("6 bytes") && content.contains("(deleted)"));
+    }
+
+    /// 子模块条目:卡片展示两侧记录的短提交 id
+    #[test]
+    fn draw_submodule_entry_shows_commits() {
+        let content = render_entry(FileEntry::Pick {
+            path: "vendor/lib".to_owned(),
+            kind: PickKind::Submodule,
+            ours: Some(b"2222222222222222222222222222222222222222".to_vec()),
+            theirs: Some(b"3333333333333333333333333333333333333333".to_vec()),
+            choice: None,
+        });
+        assert!(content.contains("Submodule"));
+        assert!(content.contains("commit 2222222"));
+        assert!(content.contains("commit 3333333"));
+        assert!(!content.contains("22222222"), "应展示 7 位短 id");
     }
 }

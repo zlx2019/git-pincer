@@ -322,19 +322,33 @@ impl FileMerge {
     }
 }
 
+/// 整文件二选一条目的对象类型(决定卡片如何展示一侧的内容)。
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum PickKind {
+    /// 普通文件(二进制文件,或一侧删除了该文件):展示字节数
+    File,
+    /// 符号链接:展示链接目标
+    Symlink,
+    /// 子模块:展示该侧记录的提交 id
+    Submodule,
+}
+
 /// 会话中的单个待解决文件。
 #[derive(Debug)]
 pub enum FileEntry {
     /// 文本文件:三栏逐块解决
     Text(FileMerge),
-    /// 二进制文件:降级为整文件二选一
-    Binary {
+    /// 不能逐块合并的冲突(二进制文件 / 符号链接 / 子模块 / 修改-删除):
+    /// 降级为整条二选一
+    Pick {
         /// 文件路径
         path: String,
-        /// 本地侧完整字节
-        ours: Vec<u8>,
-        /// 远端侧完整字节
-        theirs: Vec<u8>,
+        /// 对象类型
+        kind: PickKind,
+        /// 本地侧完整内容(符号链接为链接目标,子模块为提交 id);None 表示该侧已删除
+        ours: Option<Vec<u8>>,
+        /// 远端侧完整内容;None 表示该侧已删除
+        theirs: Option<Vec<u8>>,
         /// 用户的选择
         choice: Option<Side>,
     },
@@ -345,7 +359,7 @@ impl FileEntry {
     pub fn path(&self) -> &str {
         match self {
             FileEntry::Text(m) => &m.path,
-            FileEntry::Binary { path, .. } => path,
+            FileEntry::Pick { path, .. } => path,
         }
     }
 
@@ -353,22 +367,25 @@ impl FileEntry {
     pub fn ready_to_write(&self) -> bool {
         match self {
             FileEntry::Text(m) => m.ready_to_write(),
-            FileEntry::Binary { choice, .. } => choice.is_some(),
+            FileEntry::Pick { choice, .. } => choice.is_some(),
         }
     }
 
-    /// 导出最终字节内容(前提:ready_to_write)。
+    /// 导出最终字节内容(前提:ready_to_write);所选一侧已删除时为空。
+    ///
+    /// git 模式下二选一条目经 git 整条取用一侧落盘(删除侧需删除文件,
+    /// 不能写成空文件),见 `commands::resolve::persist`。
     pub fn resolved_bytes(&self) -> Vec<u8> {
         match self {
             FileEntry::Text(m) => m.resolved_content().into_bytes(),
-            FileEntry::Binary {
+            FileEntry::Pick {
                 ours,
                 theirs,
                 choice,
                 ..
             } => match choice {
-                Some(Side::Theirs) => theirs.clone(),
-                _ => ours.clone(),
+                Some(Side::Theirs) => theirs.clone().unwrap_or_default(),
+                _ => ours.clone().unwrap_or_default(),
             },
         }
     }
@@ -597,10 +614,11 @@ mod tests {
     fn session_marks_written_and_advances() {
         let files = vec![
             FileEntry::Text(sample()),
-            FileEntry::Binary {
+            FileEntry::Pick {
                 path: "logo.png".to_owned(),
-                ours: vec![1, 2],
-                theirs: vec![3, 4],
+                kind: PickKind::File,
+                ours: Some(vec![1, 2]),
+                theirs: Some(vec![3, 4]),
                 choice: None,
             },
         ];
@@ -608,8 +626,8 @@ mod tests {
         assert!(!session.all_written());
         session.mark_written();
         assert_eq!(session.current, 1);
-        // 二进制文件选边后可写
-        if let FileEntry::Binary { choice, .. } = session.current_file_mut() {
+        // 二选一条目选边后可写
+        if let FileEntry::Pick { choice, .. } = session.current_file_mut() {
             *choice = Some(Side::Theirs);
         }
         assert!(session.current_file().ready_to_write());
